@@ -1,0 +1,338 @@
+#
+# Copyright 2021-2024 Software Radio Systems Limited
+#
+# This file is part of srsRAN
+#
+# srsRAN is free software: you can redistribute it and/or modify
+# it under the terms of the GNU Affero General Public License as
+# published by the Free Software Foundation, either version 3 of
+# the License, or (at your option) any later version.
+#
+# srsRAN is distributed in the hope that it will be useful,
+# but WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+# GNU Affero General Public License for more details.
+#
+# A copy of the GNU Affero General Public License can be found in
+# the LICENSE file in the top-level directory of this distribution
+# and at http://www.gnu.org/licenses/.
+#
+
+services:
+  ue0:
+    container_name: srsue0
+    # stdin_open: true
+    # tty: true
+    image: srsue:split_8_zmq
+    user: root
+    build:
+      context: UE
+      dockerfile: Dockerfile
+      args:
+        OS_VERSION: "22.04"
+    devices:
+      - /dev/net/tun
+    cap_add:
+      - SYS_NICE
+      - SYS_RESOURCE
+      - NET_ADMIN
+      - CAP_IPC_LOCK
+    env_file:
+      - .env
+    volumes:
+      - ./UE/ue_zmq.conf:/configs/ue.conf
+      - /dev/null:/tmp/ue.log
+    environment:
+      - LD_LIBRARY_PATH=/srsue_4G/lib/src/phy/rf/
+      - PING=${PING}
+    networks:
+      oran-intel:
+        ipv4_address: 175.53.2.1
+    command: bash -c '/srsue_4G/srsue/src/srsue /configs/ue.conf'
+
+  ue1:
+    container_name: srsue1
+    image: srsue:split_8_zmq
+    user: root
+    devices:
+      - /dev/net/tun
+    cap_add:
+      - SYS_NICE
+      - SYS_RESOURCE
+      - NET_ADMIN
+      - CAP_IPC_LOCK
+    env_file:
+      - .env
+    volumes:
+      - ./UE/ue_zmq_3.conf:/configs/ue.conf
+      - /dev/null:/tmp/ue.log
+    environment:
+      - LD_LIBRARY_PATH=/srsue_4G/lib/src/phy/rf/
+      - PING=${PING}
+    networks:
+      oran-intel:
+        ipv4_address: 175.53.3.1
+    command: bash -c '/srsue_4G/srsue/src/srsue /configs/ue.conf'
+
+  ue2:
+    container_name: srsue2
+    image: srsue:split_8_zmq
+    user: root
+    devices:
+      - /dev/net/tun
+    cap_add:
+      - SYS_NICE
+      - SYS_RESOURCE
+      - NET_ADMIN
+      - CAP_IPC_LOCK
+    env_file:
+      - .env
+    volumes:
+      - ./UE/ue_zmq_6.conf:/configs/ue.conf
+      - /dev/null:/tmp/ue.log
+    environment:
+      - LD_LIBRARY_PATH=/srsue_4G/lib/src/phy/rf/
+      - PING=${PING}
+    networks:
+      oran-intel:
+        ipv4_address: 175.53.4.1
+    command: bash -c '/srsue_4G/srsue/src/srsue /configs/ue.conf'
+
+
+  ue3:
+    container_name: srsue3
+    image: srsue:split_8_zmq
+    user: root
+    devices:
+      - /dev/net/tun
+    cap_add:
+      - SYS_NICE
+      - SYS_RESOURCE
+      - NET_ADMIN
+      - CAP_IPC_LOCK
+    env_file:
+      - .env
+    volumes:
+      - ./UE/ue_zmq_9.conf:/configs/ue.conf
+      - /dev/null:/tmp/ue.log
+    environment:
+      - LD_LIBRARY_PATH=/srsue_4G/lib/src/phy/rf/
+      - PING=${PING}
+    networks:
+      oran-intel:
+        ipv4_address: 175.53.5.1
+    command: bash -c '/srsue_4G/srsue/src/srsue /configs/ue.conf'
+
+  ue4:
+    container_name: srsue4
+    image: srsue:split_8_zmq
+    user: root
+    devices:
+      - /dev/net/tun
+    cap_add:
+      - SYS_NICE
+      - SYS_RESOURCE
+      - NET_ADMIN
+      - CAP_IPC_LOCK
+    env_file:
+      - .env
+    volumes:
+      - ./UE/ue_zmq_12.conf:/configs/ue.conf
+      - /dev/null:/tmp/ue.log
+    environment:
+      - LD_LIBRARY_PATH=/srsue_4G/lib/src/phy/rf/
+      - PING=${PING}
+    networks:
+      oran-intel:
+        ipv4_address: 175.53.6.1
+    command: bash -c '/srsue_4G/srsue/src/srsue /configs/ue.conf'
+
+
+  ue5:
+    container_name: srsue5
+    image: srsue:split_8_zmq
+    user: root
+    devices:
+      - /dev/net/tun
+    cap_add:
+      - SYS_NICE
+      - SYS_RESOURCE
+      - NET_ADMIN
+      - CAP_IPC_LOCK
+    env_file:
+      - .env
+    volumes:
+      - ./UE/ue_zmq_15.conf:/configs/ue.conf
+      - /dev/null:/tmp/ue.log
+    environment:
+      - LD_LIBRARY_PATH=/srsue_4G/lib/src/phy/rf/
+      - PING=${PING}
+    networks:
+      oran-intel:
+        ipv4_address: 175.53.7.1
+    command: bash -c '/srsue_4G/srsue/src/srsue /configs/ue.conf'
+  # ue3:
+  #   container_name: srsue3
+  #   image: srsue:split_8_zmq
+  #   user: root
+  #   devices:
+  #     - /dev/net/tun
+  #   cap_add:
+  #     - SYS_NICE
+  #     - SYS_RESOURCE
+  #     - NET_ADMIN
+  #     - CAP_IPC_LOCK
+  #   env_file:
+  #     - .env
+  #   volumes:
+  #     - ./UE/ue_zmq_3.conf:/configs/ue.conf
+  #     - /dev/null:/tmp/ue.log
+  #   environment:
+  #     - LD_LIBRARY_PATH=/srsue_4G/lib/src/phy/rf/
+  #     - PING=${PING}
+  #     - PING_IP=${CORE_IP}
+  #   networks:
+  #     oran-intel:
+  #       ipv4_address: 10.53.1.92
+  #   command: bash -c '/srsue_4G/srsue/src/srsue /configs/ue.conf'
+
+  metrics-server:
+    container_name: metrics_server
+    image: srsran/metrics_server
+    build:
+      context: RAN/srsRAN_Project/docker/metrics_server
+    environment:
+      - PORT=${METRICS_SERVER_PORT}
+      - BUCKET=${DOCKER_INFLUXDB_INIT_BUCKET}
+      - TESTBED=default
+      - URL=http://${DOCKER_INFLUXDB_INIT_HOST}:${DOCKER_INFLUXDB_INIT_PORT}
+      - ORG=${DOCKER_INFLUXDB_INIT_ORG}
+      - TOKEN=${DOCKER_INFLUXDB_INIT_ADMIN_TOKEN}
+    ports:
+      - 55555:${METRICS_SERVER_PORT}/udp
+    networks:
+      telemetry-net:
+        ipv4_address: 171.40.1.4
+
+  influxdb:
+    container_name: influxdb
+    image: influxdb:${DOCKER_INFLUXDB_VERSION}
+    volumes:
+      - influxdb-storage:/var/lib/influxdb2:rw
+    env_file:
+      - .env
+    restart: on-failure:10
+    # Uncomment port section to access InfluxDB from outside the docker network
+    ports:
+      - 8086:${DOCKER_INFLUXDB_INIT_PORT}
+    networks:
+      telemetry-net:
+        ipv4_address: 171.40.1.5
+
+  grafana:
+    container_name: grafana
+    image: srsran/grafana
+    build:
+      context: RAN/srsRAN_Project/docker/grafana
+    volumes:
+      - grafana-storage:/var/lib/grafana:rw
+    env_file:
+      - .env
+    depends_on:
+      - influxdb
+      - metrics-server
+    ports:
+      - 3300:${GRAFANA_PORT}
+    networks:
+      telemetry-net:
+        ipv4_address: 171.40.1.6
+
+  # node-exporter:
+  #   image: prom/node-exporter:latest
+  #   container_name: node-exporter
+  #   restart: unless-stopped
+  #   volumes:
+  #     - /proc:/host/proc:ro
+  #     - /sys:/host/sys:ro
+  #     - /:/rootfs:ro
+  #   command:
+  #     - '--path.procfs=/host/proc'
+  #     - '--path.rootfs=/rootfs'
+  #     - '--path.sysfs=/host/sys'
+  #     - '--collector.filesystem.mount-points-exclude=^/(sys|proc|dev|host|etc)($$|/)'
+  #   expose:
+  #     - 9100
+  #   networks:
+  #     oran-intel:
+  #       ipv4_address: 10.24.0.4
+
+
+  # prometheus:
+  #   image: prom/prometheus:latest
+  #   container_name: prometheus
+  #   ports:
+  #   - 9090:9090
+  #   command:
+  #   - --config.file=/etc/prometheus/prometheus.yml
+  #   volumes:
+  #     - prometheus-storage:/etc/prometheus
+  #   # Uncomment the following line to use the prometheus.yml file from the setup folder
+  #   # - ./setup/prometheus:/prometheus
+  #   depends_on:
+  #   - cadvisor
+  #   - node-exporter
+  #   networks:
+  #     oran-intel:
+  #       ipv4_address: 10.24.0.3
+
+
+  # cadvisor:
+  #   image: gcr.io/cadvisor/cadvisor:v0.47.2
+  #   container_name: cadvisor
+  #   ports:
+  #   - 8080:8080
+  #   volumes:
+  #   - /:/rootfs:ro
+  #   - /var/run:/var/run:rw
+  #   - /sys:/sys:ro
+  #   - /var/lib/docker/:/var/lib/docker:ro
+  #   devices:
+  #     - /dev/kmsg:/dev/kmsg
+  #   privileged: true
+  #   # command:
+  #     # - "--docker-only"
+  #     # - "--allowlisted_container_names=srscu0,srscu1,srscu2,srscu3,srsdu0,srsdu1,srsdu2,srsdu3"
+  #   depends_on:
+  #   - redis
+  #   networks:
+  #     oran-intel:
+  #       ipv4_address: 10.24.0.2
+
+
+  redis:
+    image: redis:latest
+    container_name: redis
+    ports:
+    - 6379:6379
+    networks:
+      oran-intel:
+        ipv4_address: 175.24.0.1
+
+
+volumes:
+  gnb-storage:
+  grafana-storage:
+  influxdb-storage:
+  prometheus-storage:
+    driver: local
+    driver_opts:
+      type: none
+      device: ./setup/prometheus/
+      o: bind
+
+
+networks:
+  oran-intel:
+    external: true
+  telemetry-net:
+    external: true

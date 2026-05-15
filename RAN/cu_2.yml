@@ -1,0 +1,90 @@
+# This configuration file example shows how to configure the srsRAN Project gNB to allow srsUE to connect to it. 
+# This specific example uses ZMQ in place of a USRP for the RF-frontend, and creates an FDD cell with 10 MHz bandwidth. 
+# To run the srsRAN Project gNB with this config, use the following command: 
+#   sudo ./gnb -c gnb_zmq.yaml
+gnb_id: 513
+gnb_id_bit_length: 22
+gnb_cu_up_id: 1003
+
+cu_cp:
+  max_nof_dus: 4                         # Optional UINT. Maximum number of DU connections that the CU-CP may accept.
+  max_nof_cu_ups: 4                      # Optional UINT. Maximum number of CU-UP connections that the CU-CP may accept.
+  inactivity_timer: 7200
+  request_pdu_session_timeout: 15000
+  amf:
+    addr: 175.53.1.2                 # The address or hostname of the AMF.
+    port: 38412
+    bind_addr: 175.53.10.3            # A local IP that the gNB binds to for traffic from the AMF.
+    supported_tracking_areas:
+      - tac: 7
+        plmn_list:
+          - plmn: "00101"
+            tai_slice_support_list:
+              - sst: 1
+  #inactivity_timer: 7200            # Sets the UE/PDU Session/DRB inactivity timer to 7200 seconds. Supported: [1 - 7200].
+  f1ap:
+      # procedure_timeout: 5000
+      bind_addr: 175.53.1.15
+
+cu_up:
+  f1u:
+    socket:                               # Define UDP/IP socket(s) for F1-U interface.
+      -                                     # Socket 1
+        bind_addr: 175.53.1.15               # Sets the address that the F1-U socket will bind to.
+
+# log:
+#   filename: /tmp/cu.log
+#   all_level: info
+
+pcap:
+  ngap_enable: false
+  ngap_filename: /tmp/cu_ngap.pcap
+
+#ru_sdr:
+#  device_driver: zmq                # The RF driver name.
+#  device_args: tx_port=tcp://127.0.0.1:2010,rx_port=tcp://127.0.0.1:2011,base_srate=23.04e6 # Optionally pass arguments to the selected RF driver.
+#  srate: 23.04                      # RF sample rate might need to be adjusted according to selected bandwidth.
+#  tx_gain: 75                       # Transmit gain of the RF might need to adjusted to the given situation.
+#  rx_gain: 75                       # Receive gain of the RF might need to adjusted to the given situation.
+
+#cell_cfg:
+#  dl_arfcn: 368500                  # ARFCN of the downlink carrier (center frequency).
+#  band: 3                           # The NR band.
+#  channel_bandwidth_MHz: 20         # Bandwith in MHz. Number of PRBs will be automatically derived.
+#  common_scs: 15                    # Subcarrier spacing in kHz used for data.
+#  plmn: "00101"                     # PLMN broadcasted by the gNB.
+#  tac: 7                            # Tracking area code (needs to match the core configuration).
+#  pdcch:
+#    common:
+#      ss0_index: 0                  # Set search space zero index to match srsUE capabilities
+#      coreset0_index: 12            # Set search CORESET Zero index to match srsUE capabilities
+#    dedicated:
+#      ss2_type: common              # Search Space type, has to be set to common
+#      dci_format_0_1_and_1_1: false # Set correct DCI format (fallback)
+#  prach:
+#    prach_config_index: 1           # Sets PRACH config to match what is expected by srsUE
+
+#log:
+#  filename: /tmp/gnb.log            # Path of the log file.
+#  all_level: info                   # Logging level applied to all layers.
+#  hex_max_size: 0
+
+#pcap:
+#  mac_enable: false                 # Set to true to enable MAC-layer PCAPs.
+#  mac_filename: /tmp/gnb_mac.pcap   # Path where the MAC PCAP is stored.
+#  ngap_enable: false                # Set to true to enable NGAP PCAPs.
+#  ngap_filename: /tmp/gnb_ngap.pcap # Path where the NGAP PCAP is stored.
+
+
+metrics: 
+  addr: 171.40.1.4                       # Optional TEXT:IPV4 (127.0.0.1). Sets the metrics address. Supported: IPV4 address.
+  port: 55555                           # Optional UINT. Sets the metrics UPD port. Supported: [0 - 65535].
+  enable_json: true
+  layers:
+      enable_app_usage: true
+      enable_e1ap: true
+      enable_pdcp: true
+  periodicity:
+      app_usage_report_period: 500
+      cu_cp_report_period: 500
+      cu_up_report_period: 500

@@ -1,0 +1,4 @@
+influxdb-client>=1.36
+pandas>=2.0
+aiohttp>=3.9
+rich>=13.0

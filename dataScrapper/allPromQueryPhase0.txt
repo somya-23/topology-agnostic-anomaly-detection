@@ -1,0 +1,301 @@
+count(container_last_seen{name="open5gs_5gc",instance="cadvisor:8080"}) by (instance)
+sum(machine_cpu_cores{instance="cadvisor:8080"}) by (instance)
+sum(irate(container_cpu_user_seconds_total{name="open5gs_5gc",instance="cadvisor:8080"}[5m]) * 100)by (instance) / sum(machine_cpu_cores{instance="cadvisor:8080"}) by (instance)
+((sum(container_memory_usage_bytes{name="open5gs_5gc",instance="cadvisor:8080"}) by (instance) - sum(container_memory_cache{name="open5gs_5gc",instance="cadvisor:8080"}) by (instance)) / sum(machine_memory_bytes{instance="cadvisor:8080"}) by (instance)) * 100
+sum(container_memory_usage_bytes{name="open5gs_5gc",instance="cadvisor:8080"}) by (instance) - sum(container_memory_cache{name="open5gs_5gc",instance="cadvisor:8080"}) by (instance)
+sum(machine_memory_bytes{instance="cadvisor:8080"}) by (instance)
+sum(irate(container_fs_reads_bytes_total{name="open5gs_5gc",instance="cadvisor:8080"}[5m]))by (instance)
+sum(irate(container_fs_writes_bytes_total{name="open5gs_5gc",instance="cadvisor:8080"}[5m]))by (instance)
+sum(irate(container_network_transmit_bytes_total{name="open5gs_5gc",instance="cadvisor:8080",interface="eth0"}[5m]))by (instance)
+sum(irate(container_network_receive_bytes_total{name="open5gs_5gc",instance="cadvisor:8080",interface="eth0"}[5m]))by (instance)
+sum  (irate(container_cpu_user_seconds_total{name="open5gs_5gc",instance="cadvisor:8080"}[5m]) * 100)
+sum  (container_memory_usage_bytes{name="open5gs_5gc",instance="cadvisor:8080"} - container_memory_cache{name="open5gs_5gc",instance="cadvisor:8080"})
+sum  (irate(container_fs_writes_bytes_total{name="open5gs_5gc",instance="cadvisor:8080",device!~"/dev/dm.*"}[5m]))
+sum  (irate(container_fs_reads_bytes_total{name="open5gs_5gc",instance="cadvisor:8080",device!~"/dev/dm.*"}[5m]))
+sum  (irate(container_network_transmit_bytes_total{name="open5gs_5gc",instance="cadvisor:8080",interface="eth0"}[5m]))
+sum  (irate(container_network_receive_bytes_total{name="open5gs_5gc",instance="cadvisor:8080",interface="eth0"}[5m]))
+count(container_last_seen{name="srscu0",instance="cadvisor:8080"}) by (instance)
+sum(machine_cpu_cores{instance="cadvisor:8080"}) by (instance)
+sum(irate(container_cpu_user_seconds_total{name="srscu0",instance="cadvisor:8080"}[5m]) * 100)by (instance) / sum(machine_cpu_cores{instance="cadvisor:8080"}) by (instance)
+((sum(container_memory_usage_bytes{name="srscu0",instance="cadvisor:8080"}) by (instance) - sum(container_memory_cache{name="srscu0",instance="cadvisor:8080"}) by (instance)) / sum(machine_memory_bytes{instance="cadvisor:8080"}) by (instance)) * 100
+sum(container_memory_usage_bytes{name="srscu0",instance="cadvisor:8080"}) by (instance) - sum(container_memory_cache{name="srscu0",instance="cadvisor:8080"}) by (instance)
+sum(machine_memory_bytes{instance="cadvisor:8080"}) by (instance)
+sum(irate(container_fs_reads_bytes_total{name="srscu0",instance="cadvisor:8080"}[5m]))by (instance)
+sum(irate(container_fs_writes_bytes_total{name="srscu0",instance="cadvisor:8080"}[5m]))by (instance)
+sum(irate(container_network_transmit_bytes_total{name="srscu0",instance="cadvisor:8080",interface="eth0"}[5m]))by (instance)
+sum(irate(container_network_receive_bytes_total{name="srscu0",instance="cadvisor:8080",interface="eth0"}[5m]))by (instance)
+sum  (irate(container_cpu_user_seconds_total{name="srscu0",instance="cadvisor:8080"}[5m]) * 100)
+sum  (container_memory_usage_bytes{name="srscu0",instance="cadvisor:8080"} - container_memory_cache{name="srscu0",instance="cadvisor:8080"})
+sum  (irate(container_fs_writes_bytes_total{name="srscu0",instance="cadvisor:8080",device!~"/dev/dm.*"}[5m]))
+sum  (irate(container_fs_reads_bytes_total{name="srscu0",instance="cadvisor:8080",device!~"/dev/dm.*"}[5m]))
+sum  (irate(container_network_transmit_bytes_total{name="srscu0",instance="cadvisor:8080",interface="eth0"}[5m]))
+sum  (irate(container_network_receive_bytes_total{name="srscu0",instance="cadvisor:8080",interface="eth0"}[5m]))
+count(container_last_seen{name="srsdu0",instance="cadvisor:8080"}) by (instance)
+sum(machine_cpu_cores{instance="cadvisor:8080"}) by (instance)
+sum(irate(container_cpu_user_seconds_total{name="srsdu0",instance="cadvisor:8080"}[5m]) * 100)by (instance) / sum(machine_cpu_cores{instance="cadvisor:8080"}) by (instance)
+((sum(container_memory_usage_bytes{name="srsdu0",instance="cadvisor:8080"}) by (instance) - sum(container_memory_cache{name="srsdu0",instance="cadvisor:8080"}) by (instance)) / sum(machine_memory_bytes{instance="cadvisor:8080"}) by (instance)) * 100
+sum(container_memory_usage_bytes{name="srsdu0",instance="cadvisor:8080"}) by (instance) - sum(container_memory_cache{name="srsdu0",instance="cadvisor:8080"}) by (instance)
+sum(machine_memory_bytes{instance="cadvisor:8080"}) by (instance)
+sum(irate(container_fs_reads_bytes_total{name="srsdu0",instance="cadvisor:8080"}[5m]))by (instance)
+sum(irate(container_fs_writes_bytes_total{name="srsdu0",instance="cadvisor:8080"}[5m]))by (instance)
+sum(irate(container_network_transmit_bytes_total{name="srsdu0",instance="cadvisor:8080",interface="eth0"}[5m]))by (instance)
+sum(irate(container_network_receive_bytes_total{name="srsdu0",instance="cadvisor:8080",interface="eth0"}[5m]))by (instance)
+sum  (irate(container_cpu_user_seconds_total{name="srsdu0",instance="cadvisor:8080"}[5m]) * 100)
+sum  (container_memory_usage_bytes{name="srsdu0",instance="cadvisor:8080"} - container_memory_cache{name="srsdu0",instance="cadvisor:8080"})
+sum  (irate(container_fs_writes_bytes_total{name="srsdu0",instance="cadvisor:8080",device!~"/dev/dm.*"}[5m]))
+sum  (irate(container_fs_reads_bytes_total{name="srsdu0",instance="cadvisor:8080",device!~"/dev/dm.*"}[5m]))
+sum  (irate(container_network_transmit_bytes_total{name="srsdu0",instance="cadvisor:8080",interface="eth0"}[5m]))
+sum  (irate(container_network_receive_bytes_total{name="srsdu0",instance="cadvisor:8080",interface="eth0"}[5m]))
+irate(node_pressure_cpu_waiting_seconds_total{instance="node-exporter:9100",job="node-exporter"}[10s])
+irate(node_pressure_memory_waiting_seconds_total{instance="node-exporter:9100",job="node-exporter"}[10s])
+irate(node_pressure_io_waiting_seconds_total{instance="node-exporter:9100",job="node-exporter"}[10s])
+100 * (1 - avg(rate(node_cpu_seconds_total{mode="idle", instance="node-exporter:9100"}[10s])))
+scalar(node_load1{instance="node-exporter:9100",job="node-exporter"}) * 100 / count(count(node_cpu_seconds_total{instance="node-exporter:9100",job="node-exporter"}) by (cpu))
+((node_memory_MemTotal_bytes{instance="node-exporter:9100", job="node-exporter"} - node_memory_MemFree_bytes{instance="node-exporter:9100", job="node-exporter"}) / node_memory_MemTotal_bytes{instance="node-exporter:9100", job="node-exporter"}) * 100
+(1 - (node_memory_MemAvailable_bytes{instance="node-exporter:9100", job="node-exporter"} / node_memory_MemTotal_bytes{instance="node-exporter:9100", job="node-exporter"})) * 100
+((node_memory_SwapTotal_bytes{instance="node-exporter:9100",job="node-exporter"} - node_memory_SwapFree_bytes{instance="node-exporter:9100",job="node-exporter"}) / (node_memory_SwapTotal_bytes{instance="node-exporter:9100",job="node-exporter"})) * 100
+100 - ((node_filesystem_avail_bytes{instance="node-exporter:9100",job="node-exporter",mountpoint="/",fstype!="rootfs"} * 100) / node_filesystem_size_bytes{instance="node-exporter:9100",job="node-exporter",mountpoint="/",fstype!="rootfs"})
+count(count(node_cpu_seconds_total{instance="node-exporter:9100",job="node-exporter"}) by (cpu))
+node_time_seconds{instance="node-exporter:9100",job="node-exporter"} - node_boot_time_seconds{instance="node-exporter:9100",job="node-exporter"}
+node_filesystem_size_bytes{instance="node-exporter:9100",job="node-exporter",mountpoint="/",fstype!="rootfs"}
+node_memory_MemTotal_bytes{instance="node-exporter:9100",job="node-exporter"}
+node_memory_SwapTotal_bytes{instance="node-exporter:9100",job="node-exporter"}
+sum(irate(node_cpu_seconds_total{instance="node-exporter:9100",job="node-exporter", mode="system"}[10s])) / scalar(count(count(node_cpu_seconds_total{instance="node-exporter:9100",job="node-exporter"}) by (cpu)))
+sum(irate(node_cpu_seconds_total{instance="node-exporter:9100",job="node-exporter", mode="user"}[10s])) / scalar(count(count(node_cpu_seconds_total{instance="node-exporter:9100",job="node-exporter"}) by (cpu)))
+sum(irate(node_cpu_seconds_total{instance="node-exporter:9100",job="node-exporter", mode="iowait"}[10s])) / scalar(count(count(node_cpu_seconds_total{instance="node-exporter:9100",job="node-exporter"}) by (cpu)))
+sum(irate(node_cpu_seconds_total{instance="node-exporter:9100",job="node-exporter", mode=~".*irq"}[10s])) / scalar(count(count(node_cpu_seconds_total{instance="node-exporter:9100",job="node-exporter"}) by (cpu)))
+sum(irate(node_cpu_seconds_total{instance="node-exporter:9100",job="node-exporter",  mode!='idle',mode!='user',mode!='system',mode!='iowait',mode!='irq',mode!='softirq'}[10s])) / scalar(count(count(node_cpu_seconds_total{instance="node-exporter:9100",job="node-exporter"}) by (cpu)))
+sum(irate(node_cpu_seconds_total{instance="node-exporter:9100",job="node-exporter", mode="idle"}[10s])) / scalar(count(count(node_cpu_seconds_total{instance="node-exporter:9100",job="node-exporter"}) by (cpu)))
+node_memory_MemTotal_bytes{instance="node-exporter:9100",job="node-exporter"}
+node_memory_MemTotal_bytes{instance="node-exporter:9100",job="node-exporter"} - node_memory_MemFree_bytes{instance="node-exporter:9100",job="node-exporter"} - (node_memory_Cached_bytes{instance="node-exporter:9100",job="node-exporter"} + node_memory_Buffers_bytes{instance="node-exporter:9100",job="node-exporter"} + node_memory_SReclaimable_bytes{instance="node-exporter:9100",job="node-exporter"})
+node_memory_Cached_bytes{instance="node-exporter:9100",job="node-exporter"} + node_memory_Buffers_bytes{instance="node-exporter:9100",job="node-exporter"} + node_memory_SReclaimable_bytes{instance="node-exporter:9100",job="node-exporter"}
+node_memory_MemFree_bytes{instance="node-exporter:9100",job="node-exporter"}
+(node_memory_SwapTotal_bytes{instance="node-exporter:9100",job="node-exporter"} - node_memory_SwapFree_bytes{instance="node-exporter:9100",job="node-exporter"})
+irate(node_network_receive_bytes_total{instance="node-exporter:9100",job="node-exporter"}[10s])*8
+irate(node_network_transmit_bytes_total{instance="node-exporter:9100",job="node-exporter"}[10s])*8
+100 - ((node_filesystem_avail_bytes{instance="node-exporter:9100",job="node-exporter",device!~'rootfs'} * 100) / node_filesystem_size_bytes{instance="node-exporter:9100",job="node-exporter",device!~'rootfs'})
+sum(irate(node_cpu_seconds_total{instance="node-exporter:9100",job="node-exporter", mode="system"}[10s])) / scalar(count(count(node_cpu_seconds_total{instance="node-exporter:9100",job="node-exporter"}) by (cpu)))
+sum(irate(node_cpu_seconds_total{instance="node-exporter:9100",job="node-exporter", mode="user"}[10s])) / scalar(count(count(node_cpu_seconds_total{instance="node-exporter:9100",job="node-exporter"}) by (cpu)))
+sum(irate(node_cpu_seconds_total{instance="node-exporter:9100",job="node-exporter", mode="nice"}[10s])) / scalar(count(count(node_cpu_seconds_total{instance="node-exporter:9100",job="node-exporter"}) by (cpu)))
+sum by(instance) (irate(node_cpu_seconds_total{instance="node-exporter:9100",job="node-exporter", mode="iowait"}[10s])) / scalar(count(count(node_cpu_seconds_total{instance="node-exporter:9100",job="node-exporter"}) by (cpu)))
+sum(irate(node_cpu_seconds_total{instance="node-exporter:9100",job="node-exporter", mode="irq"}[10s])) / scalar(count(count(node_cpu_seconds_total{instance="node-exporter:9100",job="node-exporter"}) by (cpu)))
+sum(irate(node_cpu_seconds_total{instance="node-exporter:9100",job="node-exporter", mode="softirq"}[10s])) / scalar(count(count(node_cpu_seconds_total{instance="node-exporter:9100",job="node-exporter"}) by (cpu)))
+sum(irate(node_cpu_seconds_total{instance="node-exporter:9100",job="node-exporter", mode="steal"}[10s])) / scalar(count(count(node_cpu_seconds_total{instance="node-exporter:9100",job="node-exporter"}) by (cpu)))
+sum(irate(node_cpu_seconds_total{instance="node-exporter:9100",job="node-exporter", mode="idle"}[10s])) / scalar(count(count(node_cpu_seconds_total{instance="node-exporter:9100",job="node-exporter"}) by (cpu)))
+node_memory_MemTotal_bytes{instance="node-exporter:9100",job="node-exporter"} - node_memory_MemFree_bytes{instance="node-exporter:9100",job="node-exporter"} - node_memory_Buffers_bytes{instance="node-exporter:9100",job="node-exporter"} - node_memory_Cached_bytes{instance="node-exporter:9100",job="node-exporter"} - node_memory_Slab_bytes{instance="node-exporter:9100",job="node-exporter"} - node_memory_PageTables_bytes{instance="node-exporter:9100",job="node-exporter"} - node_memory_SwapCached_bytes{instance="node-exporter:9100",job="node-exporter"}
+node_memory_PageTables_bytes{instance="node-exporter:9100",job="node-exporter"}
+node_memory_SwapCached_bytes{instance="node-exporter:9100",job="node-exporter"}
+node_memory_Slab_bytes{instance="node-exporter:9100",job="node-exporter"}
+node_memory_Cached_bytes{instance="node-exporter:9100",job="node-exporter"}
+node_memory_Buffers_bytes{instance="node-exporter:9100",job="node-exporter"}
+node_memory_MemFree_bytes{instance="node-exporter:9100",job="node-exporter"}
+(node_memory_SwapTotal_bytes{instance="node-exporter:9100",job="node-exporter"} - node_memory_SwapFree_bytes{instance="node-exporter:9100",job="node-exporter"})
+node_memory_HardwareCorrupted_bytes{instance="node-exporter:9100",job="node-exporter"}
+irate(node_network_receive_bytes_total{instance="node-exporter:9100",job="node-exporter"}[10s])*8
+irate(node_network_transmit_bytes_total{instance="node-exporter:9100",job="node-exporter"}[10s])*8
+node_filesystem_size_bytes{instance="node-exporter:9100",job="node-exporter",device!~'rootfs'} - node_filesystem_avail_bytes{instance="node-exporter:9100",job="node-exporter",device!~'rootfs'}
+irate(node_disk_reads_completed_total{instance="node-exporter:9100",job="node-exporter",device=~"nvme0n1"}[10s])
+irate(node_disk_writes_completed_total{instance="node-exporter:9100",job="node-exporter",device=~"nvme0n1"}[10s])
+irate(node_disk_read_bytes_total{instance="node-exporter:9100",job="node-exporter",device=~"nvme0n1"}[10s])
+irate(node_disk_written_bytes_total{instance="node-exporter:9100",job="node-exporter",device=~"nvme0n1"}[10s])
+irate(node_disk_io_time_seconds_total{instance="node-exporter:9100",job="node-exporter",device=~"nvme0n1"} [10s])
+sum by(instance) (irate(node_cpu_guest_seconds_total{instance="node-exporter:9100",job="node-exporter", mode="user"}[1m])) / on(instance) group_left sum by (instance)((irate(node_cpu_seconds_total{instance="node-exporter:9100",job="node-exporter"}[1m])))
+sum by(instance) (irate(node_cpu_guest_seconds_total{instance="node-exporter:9100",job="node-exporter", mode="nice"}[1m])) / on(instance) group_left sum by (instance)((irate(node_cpu_seconds_total{instance="node-exporter:9100",job="node-exporter"}[1m])))
+node_memory_Inactive_bytes{instance="node-exporter:9100",job="node-exporter"}
+node_memory_Active_bytes{instance="node-exporter:9100",job="node-exporter"}
+node_memory_Committed_AS_bytes{instance="node-exporter:9100",job="node-exporter"}
+node_memory_CommitLimit_bytes{instance="node-exporter:9100",job="node-exporter"}
+node_memory_Inactive_file_bytes{instance="node-exporter:9100",job="node-exporter"}
+node_memory_Inactive_anon_bytes{instance="node-exporter:9100",job="node-exporter"}
+node_memory_Active_file_bytes{instance="node-exporter:9100",job="node-exporter"}
+node_memory_Active_anon_bytes{instance="node-exporter:9100",job="node-exporter"}
+node_memory_Writeback_bytes{instance="node-exporter:9100",job="node-exporter"}
+node_memory_WritebackTmp_bytes{instance="node-exporter:9100",job="node-exporter"}
+node_memory_Dirty_bytes{instance="node-exporter:9100",job="node-exporter"}
+node_memory_Mapped_bytes{instance="node-exporter:9100",job="node-exporter"}
+node_memory_Shmem_bytes{instance="node-exporter:9100",job="node-exporter"}
+node_memory_ShmemHugePages_bytes{instance="node-exporter:9100",job="node-exporter"}
+node_memory_ShmemPmdMapped_bytes{instance="node-exporter:9100",job="node-exporter"}
+node_memory_SUnreclaim_bytes{instance="node-exporter:9100",job="node-exporter"}
+node_memory_SReclaimable_bytes{instance="node-exporter:9100",job="node-exporter"}
+node_memory_VmallocChunk_bytes{instance="node-exporter:9100",job="node-exporter"}
+node_memory_VmallocTotal_bytes{instance="node-exporter:9100",job="node-exporter"}
+node_memory_VmallocUsed_bytes{instance="node-exporter:9100",job="node-exporter"}
+node_memory_Bounce_bytes{instance="node-exporter:9100",job="node-exporter"}
+node_memory_AnonHugePages_bytes{instance="node-exporter:9100",job="node-exporter"}
+node_memory_AnonPages_bytes{instance="node-exporter:9100",job="node-exporter"}
+node_memory_KernelStack_bytes{instance="node-exporter:9100",job="node-exporter"}
+node_memory_Percpu_bytes{instance="node-exporter:9100",job="node-exporter"}
+node_memory_HugePages_Free{instance="node-exporter:9100",job="node-exporter"}
+node_memory_HugePages_Rsvd{instance="node-exporter:9100",job="node-exporter"}
+node_memory_HugePages_Surp{instance="node-exporter:9100",job="node-exporter"}
+node_memory_HugePages_Total{instance="node-exporter:9100",job="node-exporter"}
+node_memory_Hugepagesize_bytes{instance="node-exporter:9100",job="node-exporter"}
+node_memory_DirectMap1G_bytes{instance="node-exporter:9100",job="node-exporter"}
+node_memory_DirectMap2M_bytes{instance="node-exporter:9100",job="node-exporter"}
+node_memory_DirectMap4k_bytes{instance="node-exporter:9100",job="node-exporter"}
+node_memory_Unevictable_bytes{instance="node-exporter:9100",job="node-exporter"}
+node_memory_Mlocked_bytes{instance="node-exporter:9100",job="node-exporter"}
+node_memory_NFS_Unstable_bytes{instance="node-exporter:9100",job="node-exporter"}
+irate(node_vmstat_pgpgin{instance="node-exporter:9100",job="node-exporter"}[10s])
+irate(node_vmstat_pgpgout{instance="node-exporter:9100",job="node-exporter"}[10s])
+irate(node_vmstat_pswpin{instance="node-exporter:9100",job="node-exporter"}[10s])
+irate(node_vmstat_pswpout{instance="node-exporter:9100",job="node-exporter"}[10s])
+irate(node_vmstat_pgfault{instance="node-exporter:9100",job="node-exporter"}[10s])
+irate(node_vmstat_pgmajfault{instance="node-exporter:9100",job="node-exporter"}[10s])
+irate(node_vmstat_pgfault{instance="node-exporter:9100",job="node-exporter"}[10s])  - irate(node_vmstat_pgmajfault{instance="node-exporter:9100",job="node-exporter"}[10s])
+irate(node_vmstat_oom_kill{instance="node-exporter:9100",job="node-exporter"}[10s])
+node_timex_estimated_error_seconds{instance="node-exporter:9100",job="node-exporter"}
+node_timex_offset_seconds{instance="node-exporter:9100",job="node-exporter"}
+node_timex_maxerror_seconds{instance="node-exporter:9100",job="node-exporter"}
+node_timex_loop_time_constant{instance="node-exporter:9100",job="node-exporter"}
+node_timex_sync_status{instance="node-exporter:9100",job="node-exporter"}
+node_timex_frequency_adjustment_ratio{instance="node-exporter:9100",job="node-exporter"}
+node_timex_tick_seconds{instance="node-exporter:9100",job="node-exporter"}
+node_timex_tai_offset_seconds{instance="node-exporter:9100",job="node-exporter"}
+node_procs_blocked{instance="node-exporter:9100",job="node-exporter"}
+node_procs_running{instance="node-exporter:9100",job="node-exporter"}
+node_processes_state{instance="node-exporter:9100",job="node-exporter"}
+irate(node_forks_total{instance="node-exporter:9100",job="node-exporter"}[10s])
+irate(process_virtual_memory_bytes{instance="node-exporter:9100",job="node-exporter"}[10s])
+process_resident_memory_max_bytes{instance="node-exporter:9100",job="node-exporter"}
+irate(process_virtual_memory_bytes{instance="node-exporter:9100",job="node-exporter"}[10s])
+irate(process_virtual_memory_max_bytes{instance="node-exporter:9100",job="node-exporter"}[10s])
+node_processes_pids{instance="node-exporter:9100",job="node-exporter"}
+node_processes_max_processes{instance="node-exporter:9100",job="node-exporter"}
+irate(node_schedstat_running_seconds_total{instance="node-exporter:9100",job="node-exporter"}[10s])
+irate(node_schedstat_waiting_seconds_total{instance="node-exporter:9100",job="node-exporter"}[10s])
+node_processes_threads{instance="node-exporter:9100",job="node-exporter"}
+node_processes_max_threads{instance="node-exporter:9100",job="node-exporter"}
+irate(node_context_switches_total{instance="node-exporter:9100",job="node-exporter"}[10s])
+irate(node_intr_total{instance="node-exporter:9100",job="node-exporter"}[10s])
+node_load1{instance="node-exporter:9100",job="node-exporter"}
+node_load5{instance="node-exporter:9100",job="node-exporter"}
+node_load15{instance="node-exporter:9100",job="node-exporter"}
+node_cpu_scaling_frequency_hertz{instance="node-exporter:9100",job="node-exporter"}
+avg(node_cpu_scaling_frequency_max_hertz{instance="node-exporter:9100",job="node-exporter"})
+avg(node_cpu_scaling_frequency_min_hertz{instance="node-exporter:9100",job="node-exporter"})
+rate(node_pressure_cpu_waiting_seconds_total{instance="node-exporter:9100",job="node-exporter"}[10s])
+rate(node_pressure_memory_waiting_seconds_total{instance="node-exporter:9100",job="node-exporter"}[10s])
+rate(node_pressure_memory_stalled_seconds_total{instance="node-exporter:9100",job="node-exporter"}[10s])
+rate(node_pressure_io_waiting_seconds_total{instance="node-exporter:9100",job="node-exporter"}[10s])
+rate(node_pressure_io_stalled_seconds_total{instance="node-exporter:9100",job="node-exporter"}[10s])
+irate(node_interrupts_total{instance="node-exporter:9100",job="node-exporter"}[10s])
+irate(node_schedstat_timeslices_total{instance="node-exporter:9100",job="node-exporter"}[10s])
+node_entropy_available_bits{instance="node-exporter:9100",job="node-exporter"}
+irate(process_cpu_seconds_total{instance="node-exporter:9100",job="node-exporter"}[10s])
+process_max_fds{instance="node-exporter:9100",job="node-exporter"}
+process_open_fds{instance="node-exporter:9100",job="node-exporter"}
+node_hwmon_temp_celsius{instance="node-exporter:9100",job="node-exporter"} * on(chip) group_left(chip_name) node_hwmon_chip_names{instance="node-exporter:9100",job="node-exporter"}
+node_hwmon_temp_crit_alarm_celsius{instance="node-exporter:9100",job="node-exporter"} * on(chip) group_left(chip_name) node_hwmon_chip_names{instance="node-exporter:9100",job="node-exporter"}
+node_hwmon_temp_crit_celsius{instance="node-exporter:9100",job="node-exporter"} * on(chip) group_left(chip_name) node_hwmon_chip_names{instance="node-exporter:9100",job="node-exporter"}
+node_hwmon_temp_crit_hyst_celsius{instance="node-exporter:9100",job="node-exporter"} * on(chip) group_left(chip_name) node_hwmon_chip_names{instance="node-exporter:9100",job="node-exporter"}
+node_hwmon_temp_max_celsius{instance="node-exporter:9100",job="node-exporter"} * on(chip) group_left(chip_name) node_hwmon_chip_names{instance="node-exporter:9100",job="node-exporter"}
+node_cooling_device_cur_state{instance="node-exporter:9100",job="node-exporter"}
+node_cooling_device_max_state{instance="node-exporter:9100",job="node-exporter"}
+node_power_supply_online{instance="node-exporter:9100",job="node-exporter"}
+irate(node_systemd_socket_accepted_connections_total{instance="node-exporter:9100",job="node-exporter"}[10s])
+node_systemd_units{instance="node-exporter:9100",job="node-exporter",state="activating"}
+node_systemd_units{instance="node-exporter:9100",job="node-exporter",state="active"}
+node_systemd_units{instance="node-exporter:9100",job="node-exporter",state="deactivating"}
+node_systemd_units{instance="node-exporter:9100",job="node-exporter",state="failed"}
+node_systemd_units{instance="node-exporter:9100",job="node-exporter",state="inactive"}
+irate(node_disk_reads_completed_total{instance="node-exporter:9100",job="node-exporter"}[10s])
+irate(node_disk_writes_completed_total{instance="node-exporter:9100",job="node-exporter"}[10s])
+irate(node_disk_read_bytes_total{instance="node-exporter:9100",job="node-exporter"}[10s])
+irate(node_disk_written_bytes_total{instance="node-exporter:9100",job="node-exporter"}[10s])
+irate(node_disk_read_time_seconds_total{instance="node-exporter:9100",job="node-exporter"}[10s]) / irate(node_disk_reads_completed_total{instance="node-exporter:9100",job="node-exporter"}[10s])
+irate(node_disk_write_time_seconds_total{instance="node-exporter:9100",job="node-exporter"}[10s]) / irate(node_disk_writes_completed_total{instance="node-exporter:9100",job="node-exporter"}[10s])
+irate(node_disk_io_time_weighted_seconds_total{instance="node-exporter:9100",job="node-exporter"}[10s])
+irate(node_disk_reads_merged_total{instance="node-exporter:9100",job="node-exporter"}[10s])
+irate(node_disk_writes_merged_total{instance="node-exporter:9100",job="node-exporter"}[10s])
+irate(node_disk_io_time_seconds_total{instance="node-exporter:9100",job="node-exporter"}[10s])
+irate(node_disk_discard_time_seconds_total{instance="node-exporter:9100",job="node-exporter"}[10s])
+node_disk_io_now{instance="node-exporter:9100",job="node-exporter"}
+irate(node_disk_discards_completed_total{instance="node-exporter:9100",job="node-exporter"}[10s])
+irate(node_disk_discards_merged_total{instance="node-exporter:9100",job="node-exporter"}[10s])
+node_filesystem_avail_bytes{instance="node-exporter:9100",job="node-exporter",device!~'rootfs'}
+node_filesystem_free_bytes{instance="node-exporter:9100",job="node-exporter",device!~'rootfs'}
+node_filesystem_size_bytes{instance="node-exporter:9100",job="node-exporter",device!~'rootfs'}
+node_filesystem_files_free{instance="node-exporter:9100",job="node-exporter",device!~'rootfs'}
+node_filefd_maximum{instance="node-exporter:9100",job="node-exporter"}
+node_filefd_allocated{instance="node-exporter:9100",job="node-exporter"}
+node_filesystem_files{instance="node-exporter:9100",job="node-exporter",device!~'rootfs'}
+node_filesystem_readonly{instance="node-exporter:9100",job="node-exporter",device!~'rootfs'}
+node_filesystem_device_error{instance="node-exporter:9100",job="node-exporter",device!~'rootfs',fstype!~'tmpfs'}
+irate(node_network_receive_packets_total{instance="node-exporter:9100",job="node-exporter"}[10s])
+irate(node_network_transmit_packets_total{instance="node-exporter:9100",job="node-exporter"}[10s])
+irate(node_network_receive_errs_total{instance="node-exporter:9100",job="node-exporter"}[10s])
+irate(node_network_transmit_errs_total{instance="node-exporter:9100",job="node-exporter"}[10s])
+irate(node_network_receive_drop_total{instance="node-exporter:9100",job="node-exporter"}[10s])
+irate(node_network_transmit_drop_total{instance="node-exporter:9100",job="node-exporter"}[10s])
+irate(node_network_receive_compressed_total{instance="node-exporter:9100",job="node-exporter"}[10s])
+irate(node_network_transmit_compressed_total{instance="node-exporter:9100",job="node-exporter"}[10s])
+irate(node_network_receive_multicast_total{instance="node-exporter:9100",job="node-exporter"}[10s])
+irate(node_network_receive_fifo_total{instance="node-exporter:9100",job="node-exporter"}[10s])
+irate(node_network_transmit_fifo_total{instance="node-exporter:9100",job="node-exporter"}[10s])
+irate(node_network_receive_frame_total{instance="node-exporter:9100",job="node-exporter"}[10s])
+irate(node_network_transmit_carrier_total{instance="node-exporter:9100",job="node-exporter"}[10s])
+irate(node_network_transmit_colls_total{instance="node-exporter:9100",job="node-exporter"}[10s])
+node_nf_conntrack_entries{instance="node-exporter:9100",job="node-exporter"}
+node_nf_conntrack_entries_limit{instance="node-exporter:9100",job="node-exporter"}
+node_arp_entries{instance="node-exporter:9100",job="node-exporter"}
+node_network_mtu_bytes{instance="node-exporter:9100",job="node-exporter"}
+node_network_speed_bytes{instance="node-exporter:9100",job="node-exporter"}
+node_network_transmit_queue_length{instance="node-exporter:9100",job="node-exporter"}
+irate(node_softnet_processed_total{instance="node-exporter:9100",job="node-exporter"}[10s])
+irate(node_softnet_dropped_total{instance="node-exporter:9100",job="node-exporter"}[10s])
+irate(node_softnet_times_squeezed_total{instance="node-exporter:9100",job="node-exporter"}[10s])
+node_network_up{operstate="up",instance="node-exporter:9100",job="node-exporter"}
+node_network_carrier{instance="node-exporter:9100",job="node-exporter"}
+node_sockstat_TCP_alloc{instance="node-exporter:9100",job="node-exporter"}
+node_sockstat_TCP_inuse{instance="node-exporter:9100",job="node-exporter"}
+node_sockstat_TCP_mem{instance="node-exporter:9100",job="node-exporter"}
+node_sockstat_TCP_orphan{instance="node-exporter:9100",job="node-exporter"}
+node_sockstat_TCP_tw{instance="node-exporter:9100",job="node-exporter"}
+node_sockstat_UDPLITE_inuse{instance="node-exporter:9100",job="node-exporter"}
+node_sockstat_UDP_inuse{instance="node-exporter:9100",job="node-exporter"}
+node_sockstat_UDP_mem{instance="node-exporter:9100",job="node-exporter"}
+node_sockstat_FRAG_inuse{instance="node-exporter:9100",job="node-exporter"}
+node_sockstat_RAW_inuse{instance="node-exporter:9100",job="node-exporter"}
+node_sockstat_TCP_mem_bytes{instance="node-exporter:9100",job="node-exporter"}
+node_sockstat_UDP_mem_bytes{instance="node-exporter:9100",job="node-exporter"}
+node_sockstat_FRAG_memory{instance="node-exporter:9100",job="node-exporter"}
+node_sockstat_sockets_used{instance="node-exporter:9100",job="node-exporter"}
+irate(node_netstat_IpExt_InOctets{instance="node-exporter:9100",job="node-exporter"}[10s])
+irate(node_netstat_IpExt_OutOctets{instance="node-exporter:9100",job="node-exporter"}[10s])
+irate(node_netstat_Ip_Forwarding{instance="node-exporter:9100",job="node-exporter"}[10s])
+irate(node_netstat_Icmp_InMsgs{instance="node-exporter:9100",job="node-exporter"}[10s])
+irate(node_netstat_Icmp_OutMsgs{instance="node-exporter:9100",job="node-exporter"}[10s])
+irate(node_netstat_Icmp_InErrors{instance="node-exporter:9100",job="node-exporter"}[10s])
+irate(node_netstat_Udp_InDatagrams{instance="node-exporter:9100",job="node-exporter"}[10s])
+irate(node_netstat_Udp_OutDatagrams{instance="node-exporter:9100",job="node-exporter"}[10s])
+irate(node_netstat_Udp_InErrors{instance="node-exporter:9100",job="node-exporter"}[10s])
+irate(node_netstat_Udp_NoPorts{instance="node-exporter:9100",job="node-exporter"}[10s])
+irate(node_netstat_UdpLite_InErrors{instance="node-exporter:9100",job="node-exporter"}[10s])
+irate(node_netstat_Udp_RcvbufErrors{instance="node-exporter:9100",job="node-exporter"}[10s])
+irate(node_netstat_Udp_SndbufErrors{instance="node-exporter:9100",job="node-exporter"}[10s])
+irate(node_netstat_Tcp_InSegs{instance="node-exporter:9100",job="node-exporter"}[10s])
+irate(node_netstat_Tcp_OutSegs{instance="node-exporter:9100",job="node-exporter"}[10s])
+irate(node_netstat_TcpExt_ListenOverflows{instance="node-exporter:9100",job="node-exporter"}[10s])
+irate(node_netstat_TcpExt_ListenDrops{instance="node-exporter:9100",job="node-exporter"}[10s])
+irate(node_netstat_TcpExt_TCPSynRetrans{instance="node-exporter:9100",job="node-exporter"}[10s])
+irate(node_netstat_Tcp_RetransSegs{instance="node-exporter:9100",job="node-exporter"}[10s])
+irate(node_netstat_Tcp_InErrs{instance="node-exporter:9100",job="node-exporter"}[10s])
+irate(node_netstat_Tcp_OutRsts{instance="node-exporter:9100",job="node-exporter"}[10s])
+irate(node_netstat_TcpExt_TCPRcvQDrop{instance="node-exporter:9100",job="node-exporter"}[10s])
+irate(node_netstat_TcpExt_TCPOFOQueue{instance="node-exporter:9100",job="node-exporter"}[10s])
+node_netstat_Tcp_CurrEstab{instance="node-exporter:9100",job="node-exporter"}
+node_netstat_Tcp_MaxConn{instance="node-exporter:9100",job="node-exporter"}
+irate(node_netstat_TcpExt_SyncookiesFailed{instance="node-exporter:9100",job="node-exporter"}[10s])
+irate(node_netstat_TcpExt_SyncookiesRecv{instance="node-exporter:9100",job="node-exporter"}[10s])
+irate(node_netstat_TcpExt_SyncookiesSent{instance="node-exporter:9100",job="node-exporter"}[10s])
+irate(node_netstat_Tcp_ActiveOpens{instance="node-exporter:9100",job="node-exporter"}[10s])
+irate(node_netstat_Tcp_PassiveOpens{instance="node-exporter:9100",job="node-exporter"}[10s])
+node_tcp_connection_states{state="established",instance="node-exporter:9100",job="node-exporter"}
+node_tcp_connection_states{state="fin_wait2",instance="node-exporter:9100",job="node-exporter"}
+node_tcp_connection_states{state="listen",instance="node-exporter:9100",job="node-exporter"}
+node_tcp_connection_states{state="time_wait",instance="node-exporter:9100",job="node-exporter"}
+node_scrape_collector_duration_seconds{instance="node-exporter:9100",job="node-exporter"}
+node_scrape_collector_success{instance="node-exporter:9100",job="node-exporter"}
+node_textfile_scrape_error{instance="node-exporter:9100",job="node-exporter"}

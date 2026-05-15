@@ -1,0 +1,112 @@
+# Prerequisites
+*.d
+
+# Compiled Object files
+*.slo
+*.lo
+*.o
+*.obj
+
+# Precompiled Headers
+*.gch
+*.pch
+
+# Compiled Dynamic libraries
+*.so
+*.dylib
+*.dll
+
+# Fortran module files
+*.mod
+*.smod
+
+# Compiled Static libraries
+*.lai
+*.la
+*.a
+*.lib
+
+# Executables
+*.exe
+*.out
+*.app
+
+RAN/srsRAN_Project/build
+UE/srsRAN_4G
+RIC/oran-sc-ric
+xApps
+RAN/srsRAN_Project
+RAN/srsRAN_Project.tar.gz
+setup/prometheus-data
+!RIC
+!setup/srsRAN_Project/cu.cpp
+
+dataScrapper/intermediateFileGenerator/Cadvisor.txt
+dataScrapper/intermediateFileGenerator/tmp.txt
+dataScrapper/Node.txt
+dataScrapper/promCadvisor.txt
+stresser/*.csv
+# !stresser/file_data.csv
+!stresser/final_stresser_&_data_Scrapper.py
+dataScrapper/new_dataScrapper.py
+stresser/0_new_stresser.py
+stresser/1_stresser.py
+stresser/new_stresser.py
+dataScrapper/*csv
+
+# =========================
+# Python virtual envs
+# =========================
+venv/
+env/
+somya_oran/
+.venv/
+
+# =========================
+# Python cache
+# =========================
+__pycache__/
+*.pyc
+
+# =========================
+# ML artifacts
+# =========================
+*.pt
+*.pth
+*.pkl
+*.npz
+
+# =========================
+# Logs
+# =========================
+*.log
+
+# =========================
+# Experiment outputs
+# =========================
+results/
+models/
+
+# =========================
+# Jupyter
+# =========================
+.ipynb_checkpoints/
+
+# =========================
+# VSCode
+# =========================
+.vscode/
+
+# =========================
+# OS files
+# =========================
+.DS_Store
+
+# Experiment logs
+experiment_log.txt
+traffic_gen.log
+
+# Generated datasets
+**/*.csv
+
+experiment_phase0_1cu_1du/

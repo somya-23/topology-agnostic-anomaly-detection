@@ -1,0 +1,272 @@
+#
+# Copyright 2021-2024 Software Radio Systems Limited
+#
+# This file is part of srsRAN
+#
+# srsRAN is free software: you can redistribute it and/or modify
+# it under the terms of the GNU Affero General Public License as
+# published by the Free Software Foundation, either version 3 of
+# the License, or (at your option) any later version.
+#
+# srsRAN is distributed in the hope that it will be useful,
+# but WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+# GNU Affero General Public License for more details.
+#
+# A copy of the GNU Affero General Public License can be found in
+# the LICENSE file in the top-level directory of this distribution
+# and at http://www.gnu.org/licenses/.
+#
+
+services:  
+  du0:
+    container_name: srsdu0
+    image: srsran:split_8_zmq
+    stdin_open: true # docker run -i
+    tty: true        # docker run -t
+    privileged: true
+    cap_add:
+      - SYS_NICE
+      - CAP_SYS_PTRACE
+    volumes:
+      - /dev/bus/usb/:/dev/bus/usb/
+      - /usr/share/uhd/images:/usr/share/uhd/images
+      - ./RAN/du_zmq.conf:/config/du.conf
+      - ./RAN/du_entrypoint.sh:/tmp/entrypoint.sh
+    networks:
+      oran-intel:
+        ipv4_address: 175.53.1.10
+      telemetry-net:
+        ipv4_address: 171.53.1.10
+    # depends_on:
+    #   - cu0
+    #   - 5gc
+    command: bash -c 'chmod +x /tmp/entrypoint.sh && /tmp/entrypoint.sh && srsdu -c /config/du.conf'
+    deploy:
+      resources:
+        limits:
+          cpus: "3.0"
+          memory: 3G
+        reservations:
+          cpus: "3.0"
+          memory: 3G
+
+  du1:
+    container_name: srsdu1
+    image: srsran:split_8_zmq
+    stdin_open: true # docker run -i
+    tty: true        # docker run -t
+    privileged: true
+    cap_add:
+      - SYS_NICE
+      - CAP_SYS_PTRACE
+    volumes:
+      - /dev/bus/usb/:/dev/bus/usb/
+      - /usr/share/uhd/images:/usr/share/uhd/images
+      - ./RAN/du_zmq_1.conf:/config/du.conf
+      - ./RAN/du_entrypoint.sh:/tmp/entrypoint.sh
+    networks:
+      oran-intel:
+        ipv4_address: 175.53.1.13
+      telemetry-net:
+        ipv4_address: 171.53.1.13
+    # depends_on:
+    #   - cu1
+    #   - 5gc
+    command: bash -c 'chmod +x /tmp/entrypoint.sh && /tmp/entrypoint.sh && srsdu -c /config/du.conf'
+    deploy:
+      resources:
+        limits:
+          cpus: "3.0"
+          memory: 3G
+        reservations:
+          cpus: "3.0"
+          memory: 3G
+  
+  
+  du2:
+    container_name: srsdu2
+    image: srsran:split_8_zmq
+    stdin_open: true # docker run -i
+    tty: true        # docker run -t
+    privileged: true
+    cap_add:
+      - SYS_NICE
+      - CAP_SYS_PTRACE
+    volumes:
+      - /dev/bus/usb/:/dev/bus/usb/
+      - /usr/share/uhd/images:/usr/share/uhd/images
+      - ./RAN/du_zmq_2.conf:/config/du.conf
+      - ./RAN/du_entrypoint.sh:/tmp/entrypoint.sh
+
+    networks:
+      oran-intel:
+        ipv4_address: 175.53.1.14
+      telemetry-net:
+        ipv4_address: 171.53.1.14
+    # depends_on:
+    #   - cu2
+    #   - 5gc
+    command: bash -c 'chmod +x /tmp/entrypoint.sh && /tmp/entrypoint.sh && srsdu -c /config/du.conf'
+    deploy:
+      resources:
+        limits:
+          cpus: "3.0"
+          memory: 3G
+        reservations:
+          cpus: "3.0"
+          memory: 3G
+
+
+  du3:
+      container_name: srsdu3
+      image: srsran:split_8_zmq
+      stdin_open: true # docker run -i
+      tty: true        # docker run -t
+      privileged: true
+      cap_add:
+        - SYS_NICE
+        - CAP_SYS_PTRACE
+      volumes:
+        - /dev/bus/usb/:/dev/bus/usb/
+        - /usr/share/uhd/images:/usr/share/uhd/images
+        - ./RAN/du_zmq_3.conf:/config/du.conf
+        - ./RAN/du_entrypoint.sh:/tmp/entrypoint.sh
+      networks:
+        oran-intel:
+          ipv4_address: 175.53.1.16
+        telemetry-net:
+          ipv4_address: 171.53.1.16
+      # depends_on:
+      #   - cu2
+      #   - 5gc
+      command: bash -c 'chmod +x /tmp/entrypoint.sh && /tmp/entrypoint.sh && srsdu -c /config/du.conf'
+      deploy:
+        resources:
+          limits:
+            cpus: "3.0"
+            memory: 3G
+          reservations:
+            cpus: "3.0"
+            memory: 3G
+
+
+  du4:
+      container_name: srsdu4
+      image: srsran:split_8_zmq
+      stdin_open: true # docker run -i
+      tty: true        # docker run -t
+      privileged: true
+      cap_add:
+        - SYS_NICE
+        - CAP_SYS_PTRACE
+      volumes:
+        - /dev/bus/usb/:/dev/bus/usb/
+        - /usr/share/uhd/images:/usr/share/uhd/images
+        - ./RAN/du_zmq_4.conf:/config/du.conf
+        - ./RAN/du_entrypoint.sh:/tmp/entrypoint.sh
+      networks:
+        oran-intel:
+          ipv4_address: 175.53.1.17
+        telemetry-net:
+          ipv4_address: 171.53.1.17
+      # depends_on:
+      #   - cu2
+      #   - 5gc
+      command: bash -c 'chmod +x /tmp/entrypoint.sh && /tmp/entrypoint.sh && srsdu -c /config/du.conf'
+      deploy:
+        resources:
+          limits:
+            cpus: "3.0"
+            memory: 3G
+          reservations:
+            cpus: "3.0"
+            memory: 3G
+    
+  du5:
+      container_name: srsdu5
+      image: srsran:split_8_zmq
+      stdin_open: true # docker run -i
+      tty: true        # docker run -t
+      privileged: true
+      cap_add:
+        - SYS_NICE
+        - CAP_SYS_PTRACE
+      volumes:
+        - /dev/bus/usb/:/dev/bus/usb/
+        - /usr/share/uhd/images:/usr/share/uhd/images
+        - ./RAN/du_zmq_5.conf:/config/du.conf
+        - ./RAN/du_entrypoint.sh:/tmp/entrypoint.sh
+      networks:
+        oran-intel:
+          ipv4_address: 175.53.1.18
+        telemetry-net:
+          ipv4_address: 171.53.1.18
+      # depends_on:
+      #   - cu2
+      #   - 5gc
+      command: bash -c 'chmod +x /tmp/entrypoint.sh && /tmp/entrypoint.sh && srsdu -c /config/du.conf'
+      deploy:
+        resources:
+          limits:
+            cpus: "3.0"
+            memory: 3G
+          reservations:
+            cpus: "3.0"
+            memory: 3G
+  # du3:
+  #   container_name: srsdu3
+  #   image: srsran:split_8_zmq
+  #   stdin_open: true # docker run -i
+  #   tty: true        # docker run -t
+  #   privileged: true
+  #   cap_add:
+  #     - SYS_NICE
+  #     - CAP_SYS_PTRACE
+  #   volumes:
+  #     - /dev/bus/usb/:/dev/bus/usb/
+  #     - /usr/share/uhd/images:/usr/share/uhd/images
+  #     - ./RAN/du_zmq_3.conf:/config/du.conf
+  #   networks:
+  #     oran-intel:
+  #       ipv4_address: 10.53.1.91
+  #   # depends_on:
+  #   #   - cu3
+  #   #   - 5gc
+  #   command: srsdu -c /config/du.conf
+  #   deploy:
+  #     resources:
+  #       limits:
+  #         cpus: "3.0"
+  #         memory: 3G
+  #       reservations:
+  #         cpus: "3.0"
+  #         memory: 3G
+
+  redis:
+    image: redis:latest
+    container_name: redis
+    ports:
+    - 6379:6379
+    networks:
+      oran-intel:
+        ipv4_address: 175.24.0.1
+
+
+volumes:
+  gnb-storage:
+  grafana-storage:
+  influxdb-storage:
+  prometheus-storage:
+    driver: local
+    driver_opts:
+      type: none
+      device: ./setup/prometheus/
+      o: bind
+
+
+networks:
+  oran-intel:
+    external: true
+  telemetry-net:
+    external: true

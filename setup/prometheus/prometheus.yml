@@ -1,0 +1,19 @@
+global:
+  scrape_interval: 1s
+  external_labels:
+    monitor: production-01
+
+scrape_configs:
+  - job_name: 'cadvisor'
+    scrape_interval: 1s
+    static_configs:
+      - targets: ['cadvisor:8080']
+    relabel_configs:
+      # - source_labels: [__meta_docker_container_name]
+      #   regex: '^/(srscu0|srscu1|srscu2|srscu3|srsdu0|srsdu1|srsdu2|srsdu3)$'
+      #   action: keep
+
+  - job_name: 'node-exporter'
+    scrape_interval: 1s
+    static_configs:
+      - targets: ['node-exporter:9100']

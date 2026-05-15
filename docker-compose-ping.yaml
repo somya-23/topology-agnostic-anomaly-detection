@@ -1,0 +1,393 @@
+#
+# Copyright 2021-2024 Software Radio Systems Limited
+#
+# This file is part of srsRAN
+#
+# srsRAN is free software: you can redistribute it and/or modify
+# it under the terms of the GNU Affero General Public License as
+# published by the Free Software Foundation, either version 3 of
+# the License, or (at your option) any later version.
+#
+# srsRAN is distributed in the hope that it will be useful,
+# but WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+# GNU Affero General Public License for more details.
+#
+# A copy of the GNU Affero General Public License can be found in
+# the LICENSE file in the top-level directory of this distribution
+# and at http://www.gnu.org/licenses/.
+#
+
+services:
+  5gc:
+    container_name: open5gs_5gc
+    build:
+      context: RAN/srsRAN_Project/docker/open5gs
+      target: open5gs
+      args:
+        OS_VERSION: "22.04"
+        OPEN5GS_VERSION: "v2.7.0"
+    env_file:
+      - ${OPEN_5GS_ENV_FILE:-RAN/srsRAN_Project/docker/open5gs/open5gs.env}
+    privileged: true
+    ports:
+      - "9999:9999/tcp"
+    # Uncomment port to use the 5gc from outside the docker network
+      - "38412:38412/sctp"
+      - "2152:2152/udp"
+    command: 5gc -c open5gs-5gc.yml
+    healthcheck:
+      test: [ "CMD-SHELL", "nc -z 127.0.0.20 7777" ]
+      interval: 3s
+      timeout: 1s
+      retries: 60
+    networks:
+      oran-intel:
+        ipv4_address: ${OPEN5GS_IP:-10.53.1.2}
+
+  cu0:
+    container_name: srscu0
+    image: srsran:split_8_zmq
+    build:
+      context: RAN/srsRAN_Project/
+      dockerfile: docker/Dockerfile
+      args:
+        OS_VERSION: "22.04"
+    # stdin_open: true # docker run -i
+    # tty: true        # docker run -t
+    privileged: true
+    cap_add:
+      - SYS_NICE
+      - CAP_SYS_PTRACE
+    volumes:
+      - /dev/bus/usb/:/dev/bus/usb/
+      - /usr/share/uhd/images:/usr/share/uhd/images
+      - ./RAN/entrypoint_0.sh:/tmp/entrypoint.sh
+      - ./RAN/cu_0.yml:/config/cu.conf
+    networks:
+      oran-intel:
+        ipv4_address: 10.53.1.240
+    depends_on:
+      5gc:
+        condition: service_healthy
+    command:  bash -c 'chmod +x /tmp/entrypoint.sh && /tmp/entrypoint.sh && srscu -c /config/cu.conf'
+
+  cu1:
+    container_name: srscu1
+    image: srsran:split_8_zmq
+    # stdin_open: true # docker run -i
+    # tty: true        # docker run -t
+    privileged: true
+    cap_add:
+      - SYS_NICE
+      - CAP_SYS_PTRACE
+    volumes:
+      - /dev/bus/usb/:/dev/bus/usb/
+      - /usr/share/uhd/images:/usr/share/uhd/images
+      - ./RAN/entrypoint_1.sh:/tmp/entrypoint.sh
+      - ./RAN/cu_1.yml:/config/cu.conf
+    networks:
+      oran-intel:
+        ipv4_address: 10.53.1.140
+    depends_on:
+      5gc:
+        condition: service_healthy
+    command:  bash -c 'chmod +x /tmp/entrypoint.sh && /tmp/entrypoint.sh && srscu -c /config/cu.conf'
+  
+  cu2:
+    container_name: srscu2
+    image: srsran:split_8_zmq
+    # stdin_open: true # docker run -i
+    # tty: true        # docker run -t
+    privileged: true
+    cap_add:
+      - SYS_NICE
+      - CAP_SYS_PTRACE
+    volumes:
+      - /dev/bus/usb/:/dev/bus/usb/
+      - /usr/share/uhd/images:/usr/share/uhd/images
+      - ./RAN/entrypoint_2.sh:/tmp/entrypoint.sh
+      - ./RAN/cu_2.yml:/config/cu.conf
+    networks:
+      oran-intel:
+        ipv4_address: 10.53.1.80
+    depends_on:
+      5gc:
+        condition: service_healthy
+    command:  bash -c 'chmod +x /tmp/entrypoint.sh && /tmp/entrypoint.sh && srscu -c /config/cu.conf'
+  
+  cu3:
+    container_name: srscu3
+    image: srsran:split_8_zmq
+    # stdin_open: true # docker run -i
+    # tty: true        # docker run -t
+    privileged: true
+    cap_add:
+      - SYS_NICE
+      - CAP_SYS_PTRACE
+    volumes:
+      - /dev/bus/usb/:/dev/bus/usb/
+      - /usr/share/uhd/images:/usr/share/uhd/images
+      - ./RAN/entrypoint_3.sh:/tmp/entrypoint.sh
+      - ./RAN/cu_3.yml:/config/cu.conf
+    networks:
+      oran-intel:
+        ipv4_address: 10.53.1.90
+    depends_on:
+      5gc:
+        condition: service_healthy
+    command:  bash -c 'chmod +x /tmp/entrypoint.sh && /tmp/entrypoint.sh && srscu -c /config/cu.conf'
+  
+  
+  du0:
+    container_name: srsdu0
+    image: srsran:split_8_zmq
+    # stdin_open: true # docker run -i
+    # tty: true        # docker run -t
+    privileged: true
+    cap_add:
+      - SYS_NICE
+      - CAP_SYS_PTRACE
+    volumes:
+      - /dev/bus/usb/:/dev/bus/usb/
+      - /usr/share/uhd/images:/usr/share/uhd/images
+      - ./RAN/du_zmq.conf:/config/du.conf
+    networks:
+      oran-intel:
+        ipv4_address: 10.53.1.250
+    depends_on:
+      - cu0
+      - 5gc
+    command: srsdu -c /config/du.conf
+
+  du1:
+    container_name: srsdu1
+    image: srsran:split_8_zmq
+    # stdin_open: true # docker run -i
+    # tty: true        # docker run -t
+    privileged: true
+    cap_add:
+      - SYS_NICE
+      - CAP_SYS_PTRACE
+    volumes:
+      - /dev/bus/usb/:/dev/bus/usb/
+      - /usr/share/uhd/images:/usr/share/uhd/images
+      - ./RAN/du_zmq_1.conf:/config/du.conf
+    networks:
+      oran-intel:
+        ipv4_address: 10.53.1.150
+    depends_on:
+      - cu1
+      - 5gc
+    command: srsdu -c /config/du.conf
+  
+  du2:
+    container_name: srsdu2
+    image: srsran:split_8_zmq
+    # stdin_open: true # docker run -i
+    # tty: true        # docker run -t
+    privileged: true
+    cap_add:
+      - SYS_NICE
+      - CAP_SYS_PTRACE
+    volumes:
+      - /dev/bus/usb/:/dev/bus/usb/
+      - /usr/share/uhd/images:/usr/share/uhd/images
+      - ./RAN/du_zmq_2.conf:/config/du.conf
+    networks:
+      oran-intel:
+        ipv4_address: 10.53.1.81
+    depends_on:
+      - cu2
+      - 5gc
+    command: srsdu -c /config/du.conf
+  
+  du3:
+    container_name: srsdu3
+    image: srsran:split_8_zmq
+    # stdin_open: true # docker run -i
+    # tty: true        # docker run -t
+    privileged: true
+    cap_add:
+      - SYS_NICE
+      - CAP_SYS_PTRACE
+    volumes:
+      - /dev/bus/usb/:/dev/bus/usb/
+      - /usr/share/uhd/images:/usr/share/uhd/images
+      - ./RAN/du_zmq_3.conf:/config/du.conf
+    networks:
+      oran-intel:
+        ipv4_address: 10.53.1.91
+    depends_on:
+      - cu3
+      - 5gc
+    command: srsdu -c /config/du.conf
+
+  ue0:
+    container_name: srsue0
+    # stdin_open: true
+    # tty: true
+    image: srsue:split_8_zmq
+    build:
+      context: UE
+      dockerfile: Dockerfile
+      args:
+        OS_VERSION: "22.04"
+    devices:
+      - /dev/net/tun
+    cap_add:
+      - SYS_NICE
+      - SYS_RESOURCE
+      - NET_ADMIN
+    env_file:
+      - .env
+    depends_on:
+      - 5gc
+      - cu0
+      - du0
+    volumes:
+      - ./UE/ue_zmq.conf:/configs/ue.conf
+    environment:
+      - LD_LIBRARY_PATH=/srsue_4G/lib/src/phy/rf/
+      - PING=${PING}
+    networks:
+      oran-intel:
+        ipv4_address: 10.53.1.251
+    command: bash -c '/srsue_4G/srsue/src/srsue /configs/ue.conf & if [ "$PING" = "on" ]; then ./ping.sh 10.45.1.1; fi'
+
+  ue1:
+    container_name: srsue1
+    image: srsue:split_8_zmq
+    devices:
+      - /dev/net/tun
+    cap_add:
+      - SYS_NICE
+      - SYS_RESOURCE
+      - NET_ADMIN
+    env_file:
+      - .env
+    depends_on:
+      - 5gc
+      - cu1
+      - du1
+    volumes:
+      - ./UE/ue_zmq_1.conf:/configs/ue.conf
+    environment:
+      - LD_LIBRARY_PATH=/srsue_4G/lib/src/phy/rf/
+      - PING=${PING}
+    networks:
+      oran-intel:
+        ipv4_address: 10.53.1.151
+    command: bash -c '/srsue_4G/srsue/src/srsue /configs/ue.conf & if [ "$PING" = "on" ]; then ./ping.sh 10.45.1.2; fi'
+
+  ue2:
+    container_name: srsue2
+    image: srsue:split_8_zmq
+    devices:
+      - /dev/net/tun
+    cap_add:
+      - SYS_NICE
+      - SYS_RESOURCE
+      - NET_ADMIN
+    env_file:
+      - .env
+    depends_on:
+      - 5gc
+      - cu2
+      - du2
+    volumes:
+      - ./UE/ue_zmq_2.conf:/configs/ue.conf
+    environment:
+      - LD_LIBRARY_PATH=/srsue_4G/lib/src/phy/rf/
+      - PING=${PING}
+    networks:
+      oran-intel:
+        ipv4_address: 10.53.1.82
+    command: bash -c '/srsue_4G/srsue/src/srsue /configs/ue.conf & if [ "$PING" = "on" ]; then ./ping.sh 10.45.1.3; fi'
+
+  ue3:
+    container_name: srsue3
+    image: srsue:split_8_zmq
+    devices:
+      - /dev/net/tun
+    cap_add:
+      - SYS_NICE
+      - SYS_RESOURCE
+      - NET_ADMIN
+    env_file:
+      - .env
+    depends_on:
+      - 5gc
+      - cu3
+      - du3
+    volumes:
+      - ./UE/ue_zmq_3.conf:/configs/ue.conf
+    environment:
+      - LD_LIBRARY_PATH=/srsue_4G/lib/src/phy/rf/
+      - PING=${PING}
+      - PING_IP=${PING_IP_3}
+    networks:
+      oran-intel:
+        ipv4_address: 10.53.1.92
+    command: bash -c '/srsue_4G/srsue/src/srsue /configs/ue.conf & if [ "$PING" = "on" ]; then ./ping.sh 10.45.1.4; fi'
+
+  metrics-server:
+    container_name: metrics_server
+    image: srsran/metrics_server
+    build:
+      context: RAN/srsRAN_Project/docker/metrics_server
+    environment:
+      - PORT=${METRICS_SERVER_PORT}
+      - BUCKET=${DOCKER_INFLUXDB_INIT_BUCKET}
+      - TESTBED=default
+      - URL=http://${DOCKER_INFLUXDB_INIT_HOST}:${DOCKER_INFLUXDB_INIT_PORT}
+      - ORG=${DOCKER_INFLUXDB_INIT_ORG}
+      - TOKEN=${DOCKER_INFLUXDB_INIT_ADMIN_TOKEN}
+    ports:
+      - 55555:${METRICS_SERVER_PORT}/udp
+    networks:
+      oran-intel:
+        ipv4_address: 10.40.1.4 
+
+  influxdb:
+    container_name: influxdb
+    image: influxdb:${DOCKER_INFLUXDB_VERSION}
+    volumes:
+      - influxdb-storage:/var/lib/influxdb2:rw
+    env_file:
+      - .env
+    restart: on-failure:10
+    # Uncomment port section to access InfluxDB from outside the docker network
+    ports:
+      - 8086:${DOCKER_INFLUXDB_INIT_PORT}
+    networks:
+      oran-intel:
+        ipv4_address: 10.40.1.5
+
+  grafana:
+    container_name: grafana
+    image: srsran/grafana
+    build:
+      context: RAN/srsRAN_Project/docker/grafana
+    volumes:
+      - grafana-storage:/var/lib/grafana:rw
+    env_file:
+      - .env
+    depends_on:
+      - influxdb
+      - metrics-server
+    ports:
+      - 3300:${GRAFANA_PORT}
+    networks:
+      oran-intel:
+        ipv4_address: 10.40.1.6
+
+
+volumes:
+  gnb-storage:
+  grafana-storage:
+  influxdb-storage:
+
+networks:
+  oran-intel:
+    external: true
