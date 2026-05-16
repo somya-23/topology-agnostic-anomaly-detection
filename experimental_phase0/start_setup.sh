@@ -31,15 +31,15 @@ info() { echo -e "${CYAN}[$(date '+%H:%M:%S')]${NC} $1"; }
 # ─── Parse Arguments ──────────────────────────────────────────────────
 CLEAN=false
 SETUP_ONLY=false
-NORMAL_HOURS=5
-FAULT_REPS=2
+NORMAL_HOURS=1
+FAULT_REPS=1
 
 while [[ $# -gt 0 ]]; do
     case $1 in
         --clean)        CLEAN=true; shift ;;
         --setup-only)   SETUP_ONLY=true; shift ;;
         --normal-hours) NORMAL_HOURS="$2"; shift 2 ;;
-        --fault-reps)   FAULT_REPS="$2"; shift 2 ;;
+        --fault-reps)   FAULT_REPS="$1"; shift 1 ;;
         *) err "Unknown argument: $1"; exit 1 ;;
     esac
 done
@@ -53,7 +53,7 @@ cleanup_on_exit() {
     warn "Caught interrupt — cleaning up background processes..."
     pkill -f "test_traffic.py" 2>/dev/null || true
     pkill -f "scrapper_prometheus_backup.py" 2>/dev/null || true
-    for c in srsue0 srsue1 srsue2 srsue3 srsue4 srsue5 open5gs_5gc; do
+    for c in srsue2 ; do
         docker exec "$c" pkill -9 iperf 2>/dev/null || true
     done
     log "Background processes killed. Containers still running."
@@ -127,7 +127,7 @@ if [ "$CLEAN" = true ]; then
     docker rm   prometheus cadvisor 2>/dev/null || true
     pkill -f "scrapper_prometheus_backup.py" 2>/dev/null || true
     pkill -f "test_traffic.py" 2>/dev/null || true
-    for c in srsue0 srsue1 srsue2 srsue3 srsue4 srsue5 open5gs_5gc; do
+    for c in srsue2 open5gs_5gc; do
         docker exec "$c" pkill -9 iperf 2>/dev/null || true
     done
     log "Cleanup done"
@@ -191,36 +191,39 @@ sleep 3
 
 # ─── Step 3: Core Network (5GC) + CUs ────────────────────────────────
 log "=== Step 3: Starting 5GC + CUs (docker-compose-cu++.yaml) ==="
-docker compose -f "${BASE_DIR}/docker-compose-cu++.yaml" up -d
+docker compose -f "${BASE_DIR}/docker-compose-cu++.yaml" up -d 5gc
 
 wait_for_healthy open5gs_5gc 120
+docker compose -f "${BASE_DIR}/docker-compose-cu++.yaml" up -d cu1
 
-for cu in srscu0 srscu1 srscu2; do
-    wait_for_container "$cu" 30
-done
-log "All CUs started"
+
+# for cu in srscu0 srscu1 srscu2; do
+wait_for_container srscu1 30
+# done
+log "CU1 started"
 sleep 5
 
 # ─── Step 4: DUs ─────────────────────────────────────────────────────
 log "=== Step 4: Starting DUs (docker-compose-du.yaml) ==="
-docker compose -f "${BASE_DIR}/docker-compose-du.yaml" up -d
+docker compose -f "${BASE_DIR}/docker-compose-du.yaml" up -d du2
 
-for du in srsdu0 srsdu1 srsdu2 srsdu3 srsdu4 srsdu5; do
-    wait_for_container "$du" 30
-done
-log "All DUs started"
+# for du in srsdu0 srsdu1 srsdu2 srsdu3 srsdu4 srsdu5; do
+wait_for_container srsdu2 30
+# done
+log "DU2 started"
 
 log "Waiting 15s for F1 connections to establish..."
 sleep 15
 
 # ─── Step 5: UEs ─────────────────────────────────────────────────────
 log "=== Step 5: Starting UEs (docker-compose-ue++.yaml) ==="
-docker compose -f "${BASE_DIR}/docker-compose-ue++.yaml" up -d
+docker compose -f "${BASE_DIR}/docker-compose-ue++.yaml" up -d ue2
+docker compose -f "${BASE_DIR}/docker-compose-ue++.yaml" up -d grafana influxdb metrics-server
 
-for ue in srsue0 srsue1 srsue2 srsue3 srsue4 srsue5; do
-    wait_for_container "$ue" 30
+for ue in srsue2; do
+    wait_for_container srsue2 30
 done
-log "All UEs started"
+log "UE2 started"
 
 log "Waiting 30s for UE attachment and PDU sessions..."
 sleep 30
@@ -237,7 +240,7 @@ docker ps --format 'table {{.Names}}\t{{.Status}}' \
 echo ""
 log "Checking UE PDU sessions (tun_srsue interfaces)..."
 ATTACHED=0
-for ue in srsue0 srsue1 srsue2 srsue3 srsue4 srsue5; do
+for ue in srsue2; do
     ip=$(docker exec "$ue" ip -o addr show tun_srsue 2>/dev/null | awk '{print $4}' || true)
     if [ -n "$ip" ]; then
         log "  $ue: $ip"
@@ -250,7 +253,7 @@ done
 echo ""
 log "Checking for RRC Release in UE logs..."
 RRC_OK=true
-for ue in srsue0 srsue1 srsue2 srsue3 srsue4 srsue5; do
+for ue in srsue2; do
     if check_rrc_release "$ue"; then
         warn "  $ue: RRC Release DETECTED — restarting..."
         handle_rrc_release "$ue"
@@ -264,17 +267,17 @@ if [ "$RRC_OK" = false ]; then
     warn "Some UEs were restarted. Waiting 45s for re-attachment..."
     sleep 45
     ATTACHED=0
-    for ue in srsue0 srsue1 srsue2 srsue3 srsue4 srsue5; do
+    for ue in srsue2; do
         ip=$(docker exec "$ue" ip -o addr show tun_srsue 2>/dev/null | awk '{print $4}' || true)
         [ -n "$ip" ] && ATTACHED=$((ATTACHED + 1))
     done
-    log "After RRC recovery: $ATTACHED/6 UEs attached"
+    log "After RRC recovery: $ATTACHED/1 UEs attached"
 fi
 
 echo ""
 log "Checking interface assignments (eth0 should be 175.x)..."
 IFACE_OK=true
-for c in srscu0 srscu1 srscu2 srsdu0 srsdu1 srsdu2 srsdu3 srsdu4 srsdu5; do
+for c in srscu1 srsdu2; do
     eth0_ip=$(docker exec "$c" ip -o addr show eth0 2>/dev/null \
         | grep -oP '175\.\d+\.\d+\.\d+' | head -1 || true)
     if [ -n "$eth0_ip" ]; then
@@ -289,7 +292,7 @@ echo ""
 echo "=============================================="
 log "Setup complete!"
 log "  Containers: $(docker ps --format '{{.Names}}' | wc -l) running"
-log "  UEs attached: $ATTACHED/6"
+log "  UEs attached: $ATTACHED/1"
 if [ "$IFACE_OK" = true ]; then
     log "  Interfaces: All correct"
 else
@@ -320,7 +323,7 @@ TRAFFIC_LOG="${DATA_DIR}/traffic_gen.log"
 
 pkill -f "test_traffic.py" 2>/dev/null || true
 log "Killing leftover iperf sessions inside containers..."
-for c in srsue0 srsue1 srsue2 srsue3 srsue4 srsue5 open5gs_5gc; do
+for c in srsue2 open5gs_5gc; do
     docker exec "$c" pkill -9 iperf 2>/dev/null || true
 done
 sleep 1
@@ -346,7 +349,8 @@ sleep 1
 # INFLUXDB_TOKEN is already exported above — scrapper will inherit it
 nohup python3 "${BASE_DIR}/experimental_phase0/scrapper_prometheus_backup.py" \
     --normal-hours "$NORMAL_HOURS" \
-    --fault-reps   "$FAULT_REPS" \
+    --fault-reps 0 \
+    --anomaly-hours 1 \
     > "$SCRAPPER_LOG" 2>&1 &
 SCRAPPER_PID=$!
 
@@ -366,15 +370,14 @@ echo "=============================================="
 log "  Traffic Generator PID : $TRAFFIC_PID"
 log "  Scrapper Pipeline PID : $SCRAPPER_PID"
 echo ""
-log "  NORMAL phase  : ${NORMAL_HOURS}h baseline collection"
-log "  ANOMALY phase : All faults x${FAULT_REPS} reps on all containers"
-log "  Est. anomaly  : ~$(echo "9 * 3 * $FAULT_REPS * 10 / 60" | bc)h"
-log "  Est. total    : ~$(echo "$NORMAL_HOURS + 9 * 3 * $FAULT_REPS * 10 / 60" | bc)h"
+log "  NORMAL phase      : ${NORMAL_HOURS}h baseline collection (all UEs, full rate)"
+log "  HALF-TRAFFIC phase: 1h srsue2 only at 50% rate (no stress injection)"
+log "  Est. total        : ~2h"
 echo ""
 log "  Scrapper log  : tail -f $SCRAPPER_LOG"
 log "  Traffic log   : tail -f $TRAFFIC_LOG"
-log "  Normal CSV    : ${DATA_DIR}/train_normal_th3.csv"
-log "  Anomaly CSV   : ${DATA_DIR}/test_anomaly_th3.csv"
+log "  Normal CSV    : ${BASE_DIR}/experimental_phase0/traffic_testing/train_normal.csv"
+log "  Anomaly CSV   : ${BASE_DIR}/experimental_phase0/traffic_testing/test_normal_half.csv"
 echo ""
 log "  Stop all      : kill $TRAFFIC_PID $SCRAPPER_PID"
 echo "=============================================="

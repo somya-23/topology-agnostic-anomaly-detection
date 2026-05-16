@@ -64,58 +64,59 @@ signal.signal(signal.SIGINT, cleanup_and_exit)
 
 # ================= MAIN LOGIC =================
 
-def main():
-    global docker_ids
-    
-    print("Initial cleanup...")
-    force_kill_all_iperf()
-    start_iperf_server()
+# Total Gb per 15-minute interval for normal traffic phase
+DISTRIBUTION = [11.0, 8.1, 5.6, 15.0]
+WINDOW_SEC = 900  # 15 minutes
 
-    docker_ids = get_docker_ids()
-    if not docker_ids:
-        print("No UEs found. Waiting...")
-        time.sleep(10)
-        return
 
-    # Raw Distribution (Total Gb per 15-minute interval)
-    distribution = [
-        11.0, 8.1, 5.6, 3.6, 2.7, 1.9, 3.0, 5.0, 7.1, 11.1, 11.2, 11.9,
-        12.4, 12.3, 13.0, 13.1, 12.9, 12.7, 12.4, 12.2, 12.0, 13.0, 14.0, 15.0, 14.0
-    ]
-        
+def get_srsue2_ids():
+    """Finds only srsue2 container IDs (for the half-traffic phase)."""
+    try:
+        cmd = "docker ps --filter 'name=srsue2' --format '{{.ID}}'"
+        result = subprocess.check_output(cmd, shell=True, text=True)
+        return result.strip().split('\n') if result.strip() else []
+    except:
+        return []
+
+
+def run_traffic_phase(ue_ids: list, distribution: list, phase_name: str, rate_scale: float = 1.0):
+    """Runs one hour of traffic across 4x 15-minute intervals.
+
+    Args:
+        ue_ids: Container IDs to send traffic from.
+        distribution: List of 4 Gb totals per interval.
+        phase_name: Label for log output.
+        rate_scale: Multiply computed per-UE rate by this factor (0.5 = half traffic).
+    """
+    print(f"\n{'='*60}")
+    print(f"[{phase_name}] Starting — {len(ue_ids)} UE(s), scale={rate_scale}")
+    print(f"{'='*60}")
 
     for i, gb_total in enumerate(distribution):
         dist_path = f'{pwd}/trafficGenerator/traffic_distribution.txt'
         try:
             with open(dist_path, 'w') as file:
-                file.write(f"{gb_total/max(distribution)}\n")
+                file.write(f"{(gb_total * rate_scale) / max(distribution)}\n")
         except FileNotFoundError:
             print(f"Warning: Could not write to {dist_path}")
-        # Calculation: Total Gb -> Mbps -> Per UE rate
-        total_mbps = (gb_total * 1000) / 900
-        mbps_per_ue = total_mbps / len(docker_ids)
 
-        print(f"Interval {i+1}: Target {gb_total} Gb | Total Rate: {total_mbps:.2f} Mbps | Per UE: {mbps_per_ue:.2f} Mbps (flat 15min)")
+        total_mbps = (gb_total * 1000) / WINDOW_SEC
+        mbps_per_ue = (total_mbps / len(ue_ids)) * rate_scale
 
-        # Flat traffic for the whole 15-minute window: ONE long iperf per UE.
-        # Rate stays constant inside the interval; only changes at interval boundary.
-        WINDOW_SEC = 900
+        print(f"[{phase_name}] Interval {i+1}/4: {gb_total} Gb | "
+              f"{total_mbps:.2f} Mbps total | {mbps_per_ue:.2f} Mbps/UE")
+
         interval_start = time.time()
-        for cid in docker_ids:
+        for cid in ue_ids:
             start_uplink_iperf(cid, mbps_per_ue, duration=WINDOW_SEC)
 
-        # Lightweight watchdog: re-arm dead UEs with the remaining time.
-        # Cheap (every 30s, no docker exec) and self-heals UE drops without
-        # waiting a full 15 min for the next interval.
-        last_check = interval_start
         while time.time() - interval_start < WINDOW_SEC:
             time.sleep(min(30, WINDOW_SEC - (time.time() - interval_start)))
             now = time.time()
             remaining = max(1, int(WINDOW_SEC - (now - interval_start)))
             active_procs[:] = [p for p in active_procs if p.poll() is None]
 
-            # Detect any UE whose iperf has died and restart for the remaining window
-            current_ids = get_docker_ids()
+            current_ids = get_docker_ids() if rate_scale == 1.0 else get_srsue2_ids()
             for cid in current_ids:
                 still_running = any(
                     f" {cid} " in " ".join(p.args) if isinstance(p.args, list)
@@ -123,19 +124,41 @@ def main():
                     for p in active_procs
                 )
                 if not still_running and remaining > 5:
-                    print(f"  UE {cid} iperf died — restarting for remaining {remaining}s")
+                    print(f"  [{phase_name}] UE {cid} iperf died — restarting for {remaining}s")
                     start_uplink_iperf(cid, mbps_per_ue, duration=remaining)
-            last_check = now
 
-        # Hard boundary: kill anything still running before next interval changes the rate
         force_kill_all_iperf()
 
+    print(f"\n[{phase_name}] Complete.")
+
+
+def main():
+    global docker_ids
+
+    print("Initial cleanup...")
+    force_kill_all_iperf()
+    start_iperf_server()
+
+    docker_ids = get_docker_ids()
+    if not docker_ids:
+        print("No UEs found. Exiting.")
+        sys.exit(1)
+
+    # Phase 1: Normal traffic — all UEs, full rate, 1 hour
+    run_traffic_phase(docker_ids, DISTRIBUTION, phase_name="NORMAL", rate_scale=1.0)
+
+    # Cooldown before Phase 2
+    print("\n[Cooldown] Waiting 60s before half-traffic phase...")
+    time.sleep(60)
+
+    # Phase 2: Half traffic — srsue2 only, 50% rate, 1 hour
+    srsue2_ids = get_srsue2_ids()
+    if not srsue2_ids:
+        print("[HALF] No srsue2 containers found — skipping Phase 2.")
+        return
+
+    run_traffic_phase(srsue2_ids, DISTRIBUTION, phase_name="HALF", rate_scale=0.5)
+
+
 if __name__ == "__main__":
-    while True:
-        try:
-            main()
-        except KeyboardInterrupt:
-            cleanup_and_exit()
-        except Exception as e:
-            print(f"Error in main loop: {e}")
-            time.sleep(5)
+    main()

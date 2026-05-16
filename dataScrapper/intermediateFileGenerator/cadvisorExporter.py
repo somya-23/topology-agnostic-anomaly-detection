@@ -129,7 +129,7 @@ def process_queries(input_file='grafana_expressions2.txt', output_file='cadvisor
 def main():
     input_file = 'grafanaCadvisor.json'  # Replace with your actual file path
     output_file = 'Cadvisor.txt'
-    final_file = '../promCadvisor.txt'
+    final_file = '../promCadvisor_cu1.txt'
     
     # Load the Grafana JSON file
     with open(input_file, 'r') as f:

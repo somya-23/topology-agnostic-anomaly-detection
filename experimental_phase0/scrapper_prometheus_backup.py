@@ -47,6 +47,8 @@ parser.add_argument("--cooldown-period", type=int, default=420,
                     help="Cooldown between faults in seconds (default: 420)")
 parser.add_argument("--anomaly-only", action="store_true",
                     help="Skip NORMAL phase and go straight to ANOMALY collection")
+parser.add_argument("--anomaly-hours", type=float, default=0.0,
+                    help="When --fault-reps 0: collect ANOMALY data for this many hours then stop (0=unlimited)")
 args = parser.parse_args()
 
 NORMAL_DURATION_SEC = 0 if args.anomaly_only else int(args.normal_hours * 3600)
@@ -64,12 +66,12 @@ experiment_complete = threading.Event()
 # Setup Paths
 BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 EXP_DIR = os.path.join(BASE_DIR, "experimental_phase0")
-DATA_DIR = os.path.join(EXP_DIR, "data_fs_plane")
+DATA_DIR = os.path.join(EXP_DIR, "traffic_testing")
 os.makedirs(DATA_DIR, exist_ok=True)
 
-NORMAL_OUTPUT = os.path.join(DATA_DIR, "train_normal_th3.csv")
-ANOMALY_OUTPUT = os.path.join(DATA_DIR, "test_anomaly_th3.csv")
-INPUT_FILE = os.path.join(BASE_DIR, "dataScrapper", "promCadvisor.txt")
+NORMAL_OUTPUT = os.path.join(DATA_DIR, "train_normal.csv")
+ANOMALY_OUTPUT = os.path.join(DATA_DIR, "test_normal_half.csv")
+INPUT_FILE = os.path.join(BASE_DIR, "dataScrapper", "promCadvisor_cu1.txt")
 PROMETHEUS_URL = "http://localhost:9090"
 influxDB_Token = os.environ.get("INFLUXDB_TOKEN")
 if not influxDB_Token:
@@ -85,13 +87,13 @@ global_stress_data: Dict[str, List[int]] = {}
 stress_lock = threading.Lock()
 
 # RRC Release tracking
-UE_CONTAINERS = ["srsue0", "srsue1", "srsue2", "srsue3", "srsue4", "srsue5"]
+UE_CONTAINERS = ["srsue2"]
 rrc_release_flags: Dict[str, bool] = {ue: False for ue in UE_CONTAINERS}
 rrc_lock = threading.Lock()
 rrc_log_offsets: Dict[str, int] = {ue: 0 for ue in UE_CONTAINERS}
 
 # Target containers for stress
-TARGET_CONTAINERS = ["srscu0", "srscu1", "srscu2", "srsdu0", "srsdu1", "srsdu2", "srsdu3", "srsdu4", "srsdu5"]
+TARGET_CONTAINERS = ["srscu1", "srsdu2"]
 
 log_file = os.path.join(DATA_DIR, "experiment_run.log")
 logging.basicConfig(
@@ -418,15 +420,24 @@ def injectStress(container_id: str, typeOfStress: int, duration: int):
 def stress_loop():
     """Phase-aware stress loop:
     1. Wait for NORMAL phase to finish (signalled by normal_phase_done)
-    2. Wait 5 min baseline in ANOMALY mode
-    3. Inject all 3 fault types × all containers × FAULT_REPS repetitions
-    4. Signal experiment_complete when done
+    2a. If fault-reps=0: no injection; wait anomaly-hours then signal complete
+    2b. Otherwise: wait 5 min baseline, inject faults, signal complete
     """
-    # Wait for NORMAL phase to end
     logging.info(f"[Stress] Waiting for NORMAL phase to complete ({args.normal_hours}h)...")
     normal_phase_done.wait()
 
     if experiment_complete.is_set():
+        return
+
+    # Pure half-traffic mode: no stress injection, just timed anomaly collection
+    if FAULT_REPS == 0:
+        if args.anomaly_hours > 0:
+            logging.info(f"[Stress] No fault injection. Collecting ANOMALY data for {args.anomaly_hours}h...")
+            experiment_complete.wait(timeout=args.anomaly_hours * 3600)
+            logging.info("[Stress] ANOMALY collection window complete.")
+            experiment_complete.set()
+        else:
+            logging.info("[Stress] No fault injection, no --anomaly-hours limit. Run until interrupted.")
         return
 
     logging.info("[Stress] ANOMALY phase started. Waiting 5m for anomaly baseline...")
