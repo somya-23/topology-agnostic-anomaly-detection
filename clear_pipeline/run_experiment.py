@@ -76,14 +76,16 @@ from scoring import lift_score
 # USER INPUTS — change these to try different cross-topology pairs
 # =============================================================================
 
-TRAIN_TOPOS   = ["cu1_du2", "cu2_du3du4du5"]   # multi-topology training; type-shared weights see N=1 and N=3 batches
-TEST_TOPO     = "cu0_du0du1"                    # detect anomalies on this (unseen) topology
+ALL_TOPOS     = ["cu0_du0du1", "cu1_du2", "cu2_du3du4du5"]   # all available topologies
+TEST_TOPO     = "cu2_du3du4du5"                    # held-out topology; change to try a different split
+TRAIN_TOPOS   = [t for t in ALL_TOPOS if t != TEST_TOPO]      # auto-derived: all except TEST_TOPO
+RUN_ALL_LOO   = False   # True → run all 3 leave-one-out splits sequentially and print a summary table
 
 BASE_DIR      = Path("output")
 
 # Feature slices (cpu only; cpu+mem_pct can be re-enabled once threshold tuning is stable).
-CU_FEAT_SLICE = slice(0, 1)     # cpu only
-DU_FEAT_SLICE = slice(0, 1)     # cpu only
+CU_FEAT_SLICE = [0, 1, 5, 6]  # cpu, mem_pct, net_tx, net_rx
+DU_FEAT_SLICE = [0, 1, 5, 6]     # cpu, net_tx, net_rx
 
 # Preprocessing: RobustScaler v0 (raw values, no delta, no arcsinh).
 PREPROCESS_VERSION = "v0"
@@ -105,7 +107,7 @@ LR            = 5e-4
 VAL_FRAC      = 0.1             # window-level val for early stopping inside training
 CAL_FRAC      = 0.2             # tail fraction of train stream held out for threshold calibration
 SEED          = 42
-MODEL_CKPT    = Path("model_ckpt.pt")   # saved after first train; delete to retrain
+# MODEL_CKPT is computed per-run inside run_one() from the test topology name — delete to retrain.
 
 # First COLD_START_K rows of the test stream are skipped: the LSTM hidden
 # state is initialised at zero and takes ~WINDOW_LEN steps to warm up.
@@ -135,6 +137,11 @@ CLOSED_LOOP = True
 # test cold-start too (not yet implemented).  Leave False until that is fixed.
 IMPUTE = True
 
+# Save reconstruction errors after closed-loop inference so plot_recon_comparison.py
+# can overlay cpu-only vs cpu+mem results in a single figure.
+# Files are named  recon_errors_{test_topo}_f{cu_dim}.npz  (f1=cpu-only, f2=cpu+mem).
+SAVE_ERRORS = True
+
 # =============================================================================
 # HELPERS
 # =============================================================================
@@ -146,32 +153,40 @@ def load_npz(topo: str, split: str) -> dict:
 
 
 def impute_cpu_glitch(arr: np.ndarray, eps: float = 1e-6) -> np.ndarray:
-    """Forward-fill rows where any feature is 0.0 (Prometheus scrape artifact).
-
-    At 5-minute irate() boundaries, the entire metric snapshot drops to 0.0 —
-    both cpu AND mem_pct are affected simultaneously at the same timesteps.
-    Forward-filling the whole row before RobustScaler prevents the scaler from
-    seeing the outlier and keeps the LSTM sequence smooth.
-
-    arr shape: (T, dim) for CU  or  (T, N, dim) for DU.
-    Returns a copy; only glitch rows are modified.
-    """
     arr = arr.copy()
+    dim = arr.shape[1] if arr.ndim == 2 else arr.shape[2]
+    glitch_idx = list(range(dim))
     for t in range(1, len(arr)):
-        if arr.ndim == 2:                            # CU: (T, dim)
-            if (arr[t] < eps).any():                 # any feature is 0
-                arr[t] = arr[t - 1]
-        else:                                        # DU: (T, N, dim)
-            glitch = (arr[t] < eps).any(axis=-1)    # (N,) — True if any feat is 0
-            if glitch.any():
-                arr[t, glitch] = arr[t - 1, glitch]
+        if arr.ndim == 2:  # CU: (T, dim)
+            glitch = arr[t, glitch_idx] < eps
+            arr[t, glitch_idx] = np.where(glitch, arr[t - 1, glitch_idx], arr[t, glitch_idx])
+        else:              # DU: (T, N, dim)
+            glitch = arr[t, :, glitch_idx] < eps
+            arr[t, :, glitch_idx] = np.where(glitch, arr[t - 1, :, glitch_idx], arr[t, :, glitch_idx])
     return arr
-
 
 def slice_features(z: dict):
     """Apply CU/DU feature slices and return (cu, du, block_id)."""
-    cu       = z["cu"][:, CU_FEAT_SLICE].astype(np.float32)     # (T, cu_dim)
-    du       = z["du"][:, :, DU_FEAT_SLICE].astype(np.float32)  # (T, N, du_dim)
+    cu       = z["cu"].astype(np.float32)
+    du       = z["du"].astype(np.float32)
+    
+    N_DU = du.shape[1]
+
+    # -----------------------------------------------------------------
+    # TOPOLOGY NORMALIZATION
+    # -----------------------------------------------------------------
+    # Raw CU net traffic scales almost linearly with DU count.
+    # Normalize traffic features by topology size.
+    #
+    # feature index:
+    #   5 = net_tx
+    #   6 = net_rx
+    # -----------------------------------------------------------------
+
+    cu[:, 5] = cu[:, 5] / N_DU
+    cu[:, 6] = cu[:, 6] / N_DU
+    cu = cu[:, CU_FEAT_SLICE]
+    du = du[:, :, DU_FEAT_SLICE]
     if IMPUTE:
         cu = impute_cpu_glitch(cu)
         du = impute_cpu_glitch(du)
@@ -185,11 +200,12 @@ def slice_features(z: dict):
 # time via the CU cold-start probe (see step [6b] in main()).
 # =============================================================================
 
-def phase_preprocess(train_zs):
+def phase_preprocess(train_zs, train_topos):
     """Fit RobustScaler on all train topologies (pooled), transform each stream.
 
     Args:
-        train_zs: list of loaded train.npz dicts (one per topology).
+        train_zs:    list of loaded train.npz dicts (one per topology).
+        train_topos: list of topology names (for display only).
     Returns:
         bundle:  PreprocessBundle (fitted scalers; passed to transform_stream for test)
         streams: list of (cu_s, du_s, kept_bid) tuples per topology
@@ -206,7 +222,7 @@ def phase_preprocess(train_zs):
         cu_s, du_s, _, kept_bid = transform_stream(
             bundle, raw["cu"], raw["du"], raw["block_id"]
         )
-        print(f"  topo[{i}] {TRAIN_TOPOS[i]:18s}  cu_s {cu_s.shape}  du_s {du_s.shape}  "
+        print(f"  topo[{i}] {train_topos[i]:18s}  cu_s {cu_s.shape}  du_s {du_s.shape}  "
               f"(μ={cu_s.mean():+.3f}, σ={cu_s.std():.3f} after {PREPROCESS_VERSION})")
         streams.append((cu_s, du_s, kept_bid))
     return bundle, streams
@@ -218,11 +234,13 @@ def phase_preprocess(train_zs):
 # Early stopping on validation loss.
 # =============================================================================
 
-def phase_train(fit_streams) -> CalibratedTopoAR:
+def phase_train(fit_streams, train_topos, model_ckpt) -> CalibratedTopoAR:
     """Train on multiple topologies with N-homogeneous batches.
 
     Args:
         fit_streams: list of (cu_s, du_s, block_id) — train_fit portions per topology.
+        train_topos: list of topology names (for display and checkpoint metadata).
+        model_ckpt:  Path to save the checkpoint after training.
     """
     cu_dim = fit_streams[0][0].shape[1]
     du_dim = fit_streams[0][1].shape[2]
@@ -241,7 +259,7 @@ def phase_train(fit_streams) -> CalibratedTopoAR:
         val_subsets.append(torch.utils.data.Subset(ds, val_idx))
         train_lens.append(len(train_idx))
         val_lens.append(len(val_idx))
-        print(f"  topo[{i}] {TRAIN_TOPOS[i]:18s} N_DU={du_s.shape[1]}  "
+        print(f"  topo[{i}] {train_topos[i]:18s} N_DU={du_s.shape[1]}  "
               f"windows={n}  (train={len(train_idx)}, val={len(val_idx)})")
 
     train_concat = torch.utils.data.ConcatDataset(train_subsets)
@@ -315,9 +333,9 @@ def phase_train(fit_streams) -> CalibratedTopoAR:
     torch.save({"state_dict": best_state,
                 "cu_dim": cu_dim, "du_dim": du_dim, "embed_dim": EMBED_DIM,
                 "cal_frac": CAL_FRAC, "n_train_rows": n_train_rows,
-                "topos": list(TRAIN_TOPOS),
-                "preprocess": PREPROCESS_VERSION}, MODEL_CKPT)
-    print(f"  Model saved → {MODEL_CKPT}")
+                "topos": list(train_topos),
+                "preprocess": PREPROCESS_VERSION}, model_ckpt)
+    print(f"  Model saved → {model_ckpt}")
     return model
 
 # =============================================================================
@@ -383,6 +401,12 @@ def phase_infer_closed_loop(
     du_sqerrs = np.zeros((T - 1, N, du_s.shape[2]), dtype=np.float32)
 
     h, c = model.init_state(1, DEVICE)
+    # Require K consecutive anomalous timesteps before closed-loop replacement.
+    DU_HYSTERESIS = 5
+    du_anom_count = np.zeros(N, dtype=np.int32)
+
+    CU_HYSTERESIS = 5
+    cu_anom_count = 0
 
     # Feed actual values at t=0 to warm the LSTM
     cu_in = torch.tensor(cu_s[[0]], dtype=torch.float32).to(DEVICE)  # (1, cu_dim)
@@ -405,12 +429,29 @@ def phase_infer_closed_loop(
 
             # Score each entity and decide the input for step t+1
             cu_score = float((cu_err / cu_feat_norm).max())
-            cu_in = cu_hat if cu_score > cu_thr else cu_next
+
+            if cu_score > cu_thr:
+                cu_anom_count += 1
+            else:
+                cu_anom_count = 0
+
+            if cu_anom_count >= CU_HYSTERESIS:
+                cu_in = cu_hat
+            else:
+                cu_in = cu_next
 
             du_in = du_next.clone()
+
             for i in range(N):
                 du_score_i = float((du_err[i] / du_feat_norm).max())
+
                 if du_score_i > du_thr:
+                    du_anom_count[i] += 1
+                else:
+                    du_anom_count[i] = 0
+
+                # Enter closed-loop only after K consecutive anomaly steps
+                if du_anom_count[i] >= DU_HYSTERESIS:
                     du_in[0, i] = du_hat[0, i]
 
     return cu_sqerrs, du_sqerrs
@@ -498,6 +539,8 @@ def phase_evaluate(cu_sqerr, du_sqerr, cu_feat_norm, du_feat_norm,
     )  # (T', N)
     du_pred = (du_scores > du_thr).astype(int)
 
+    all_metrics = {}
+
     def metrics(name, pred, lbl):
         tp = int(((pred == 1) & (lbl == 1)).sum())
         fp = int(((pred == 1) & (lbl == 0)).sum())
@@ -508,6 +551,7 @@ def phase_evaluate(cu_sqerr, du_sqerr, cu_feat_norm, du_feat_norm,
         total_anom = int((lbl == 1).sum())
         print(f"  {name:<12s}  anom={total_anom:>6d}  TP={tp:>6d}  FP={fp:>6d}  "
               f"FN={fn:>6d}  P={p:.3f}  R={r:.3f}  F1={f1:.3f}")
+        all_metrics[name] = {"tp": tp, "fp": fp, "fn": fn, "p": p, "r": r, "f1": f1, "anom": total_anom}
 
     print(f"\n  {'Entity':<12s}  {'anom':>6s}  {'TP':>6s}  {'FP':>6s}  "
           f"{'FN':>6s}  {'P':>5s}  {'R':>5s}  {'F1':>5s}")
@@ -522,7 +566,7 @@ def phase_evaluate(cu_sqerr, du_sqerr, cu_feat_norm, du_feat_norm,
     print(f"  {'-'*72}")
     metrics("ANY", any_pred.astype(int), any_lbl.astype(int))
 
-    return cu_scores, du_scores, cu_pred, du_pred
+    return cu_scores, du_scores, cu_pred, du_pred, all_metrics
 
 # =============================================================================
 # PLOTTING
@@ -551,7 +595,8 @@ def _shade(ax, t_array, mask, color, alpha, label=None):
 
 
 def phase_plot(cu_s_te, du_s_te, cu_stress, du_stress,
-               cu_scores, du_scores, cu_pred, du_pred, cu_thr, du_thr):
+               cu_scores, du_scores, cu_pred, du_pred, cu_thr, du_thr,
+               train_topos, test_topo):
     T      = len(cu_s_te)
     t_full = np.arange(T)
     # scores/preds cover timesteps COLD_START_K+1 .. T-1
@@ -568,7 +613,7 @@ def phase_plot(cu_s_te, du_s_te, cu_stress, du_stress,
                              sharex=False)
     fig.suptitle(
         f"Cross-topology CPU stress detection\n"
-        f"Train: {'+'.join(TRAIN_TOPOS)}  →  Test: {TEST_TOPO}  "
+        f"Train: {'+'.join(train_topos)}  →  Test: {test_topo}  "
         f"(v0 preprocessing, CU={len(np.arange(7)[CU_FEAT_SLICE])}feat DU={len(np.arange(37)[DU_FEAT_SLICE])}feat)",
         fontsize=12, y=1.01,
     )
@@ -579,7 +624,7 @@ def phase_plot(cu_s_te, du_s_te, cu_stress, du_stress,
 
         # ── feature panel ────────────────────────────────────────────────────
         feat_colors = ["steelblue", "darkorange", "green", "purple"]
-        feat_labels = ["cpu (scaled)", "mem_pct (scaled)", "feat2 (scaled)", "feat3 (scaled)"]
+        feat_labels = ["cpu (scaled)", "mem_pct (scaled)", "net_tx (scaled)", "net_rx (scaled)"]
         for fi in range(feat.shape[1]):
             ax_f.plot(t_full, feat[:, fi], color=feat_colors[fi], lw=0.7,
                       label=feat_labels[fi])
@@ -608,7 +653,7 @@ def phase_plot(cu_s_te, du_s_te, cu_stress, du_stress,
         axes[-1, col].set_xlabel("Timestep", fontsize=9)
 
     plt.tight_layout()
-    out = Path("cross_anomaly_plot.png")
+    out = Path(f"cross_anomaly_plot_{test_topo}.png")
     plt.savefig(out, dpi=150, bbox_inches="tight")
     print(f"\n  Plot saved → {out.resolve()}")
     plt.close()
@@ -618,23 +663,31 @@ def phase_plot(cu_s_te, du_s_te, cu_stress, du_stress,
 # MAIN
 # =============================================================================
 
-def main():
+def run_one(train_topos, test_topo):
+    """Run one leave-one-out configuration and return per-entity evaluation metrics.
+
+    train_topos: list of topology names used for training (pooled).
+    test_topo:   topology name held out for testing (must not be in train_topos).
+    Returns:     dict mapping entity name → {tp, fp, fn, p, r, f1, anom}
+                 e.g. {"CU": {...}, "DU_0": {...}, "ANY": {...}}
+    """
+    model_ckpt = Path(f"model_ckpt_test_{test_topo}.pt")   # per-split; delete to retrain
     cu_dim_info = len(np.arange(7)[CU_FEAT_SLICE])
     du_dim_info = len(np.arange(37)[DU_FEAT_SLICE])
 
     print(f"\n{'='*70}")
     print(f"  Cross-topology CPU stress detection (multi-train + RobustScaler {PREPROCESS_VERSION})")
-    print(f"  Train : {TRAIN_TOPOS}  (normal only, pooled)")
-    print(f"  Test  : {TEST_TOPO}    (unseen topology)")
+    print(f"  Train : {train_topos}  (normal only, pooled)")
+    print(f"  Test  : {test_topo}    (unseen topology)")
     print(f"  Preprocessing : RobustScaler {PREPROCESS_VERSION}  cold-start probe={N_PROBE_ROWS} rows")
     print(f"  CU features   : {cu_dim_info}   DU features: {du_dim_info}")
     print(f"  Device        : {DEVICE}")
     print(f"{'='*70}")
 
-    # [1] Load + self-normalize ALL train topologies ──────────────────────────
-    print(f"\n[1] Loading {len(TRAIN_TOPOS)} train topologies, fitting {PREPROCESS_VERSION} scaler ...")
-    train_zs = [load_npz(t, "train") for t in TRAIN_TOPOS]
-    bundle, train_streams = phase_preprocess(train_zs)
+    # [1] Load + preprocess ALL train topologies ──────────────────────────────
+    print(f"\n[1] Loading {len(train_topos)} train topologies, fitting {PREPROCESS_VERSION} scaler ...")
+    train_zs = [load_npz(t, "train") for t in train_topos]
+    bundle, train_streams = phase_preprocess(train_zs, train_topos)
 
     # [2] Per-topology train_fit / cal split ──────────────────────────────────
     print(f"\n[2] Per-topology fit/cal split (cal_frac={CAL_FRAC}) ...")
@@ -645,18 +698,18 @@ def main():
         n_fit   = n_total - n_cal
         fit_streams.append((cu_s[:n_fit], du_s[:n_fit], kept_bid[:n_fit]))
         cal_streams.append((cu_s[n_fit:], du_s[n_fit:]))
-        print(f"  topo[{i}] {TRAIN_TOPOS[i]:18s} total={n_total}  fit={n_fit}  cal={n_cal}")
+        print(f"  topo[{i}] {train_topos[i]:18s} total={n_total}  fit={n_fit}  cal={n_cal}")
     n_fit_total = sum(len(f[0]) for f in fit_streams)
 
     # [3] Train (or load) with strict checkpoint safety check ─────────────────
     cu_dim = fit_streams[0][0].shape[1]
     du_dim = fit_streams[0][1].shape[2]
-    if MODEL_CKPT.exists():
-        print(f"\n[3] Loading model from checkpoint ({MODEL_CKPT}) — delete to retrain ...")
-        ckpt = torch.load(MODEL_CKPT, map_location=DEVICE)
+    if model_ckpt.exists():
+        print(f"\n[3] Loading model from checkpoint ({model_ckpt}) — delete to retrain ...")
+        ckpt = torch.load(model_ckpt, map_location=DEVICE)
         mismatches = []
-        if ckpt.get("topos") != list(TRAIN_TOPOS):
-            mismatches.append(f"topos: ckpt={ckpt.get('topos')} vs current={list(TRAIN_TOPOS)}")
+        if ckpt.get("topos") != list(train_topos):
+            mismatches.append(f"topos: ckpt={ckpt.get('topos')} vs current={list(train_topos)}")
         if ckpt.get("n_train_rows") != n_fit_total:
             mismatches.append(f"n_train_rows: ckpt={ckpt.get('n_train_rows')} vs current={n_fit_total}")
         if ckpt.get("cu_dim") != cu_dim:
@@ -667,17 +720,17 @@ def main():
             mismatches.append(f"preprocess: ckpt={ckpt.get('preprocess')} vs current={PREPROCESS_VERSION}")
         if mismatches:
             raise SystemExit(
-                f"\n  Refusing to load incompatible checkpoint {MODEL_CKPT}:\n    "
+                f"\n  Refusing to load incompatible checkpoint {model_ckpt}:\n    "
                 + "\n    ".join(mismatches)
-                + f"\n  Delete {MODEL_CKPT} and rerun to retrain from scratch."
+                + f"\n  Delete {model_ckpt} and rerun to retrain from scratch."
             )
         model = CalibratedTopoAR(cu_dim=ckpt["cu_dim"], du_dim=ckpt["du_dim"],
                                  embed_dim=ckpt["embed_dim"]).to(DEVICE)
         model.load_state_dict(ckpt["state_dict"])
     else:
-        print(f"\n[3] Training CalibratedTopoAR on {len(TRAIN_TOPOS)} topologies "
+        print(f"\n[3] Training CalibratedTopoAR on {len(train_topos)} topologies "
               f"(cu_dim={cu_dim}, du_dim={du_dim}, embed={EMBED_DIM}) ...")
-        model = phase_train(fit_streams)
+        model = phase_train(fit_streams, train_topos, model_ckpt)
 
     # [4] Inference on each held-out CAL stream → pool → calibrate ────────────
     print(f"\n[4] Inference on held-out CAL streams (per topology, pooled for calibration) ...")
@@ -686,7 +739,7 @@ def main():
         cu_sq, du_sq = phase_infer(model, cu_s_cal, du_s_cal)
         cu_sqerr_pool.append(cu_sq[COLD_START_K:])
         du_sqerr_pool.append(du_sq[COLD_START_K:].reshape(-1, du_sq.shape[-1]))
-        print(f"  topo[{i}] {TRAIN_TOPOS[i]:18s} cu_sqerr {cu_sq.shape}  du_sqerr {du_sq.shape}")
+        print(f"  topo[{i}] {train_topos[i]:18s} cu_sqerr {cu_sq.shape}  du_sqerr {du_sq.shape}")
     cu_sqerr_n   = np.concatenate(cu_sqerr_pool, axis=0)
     du_sqerr_flt = np.concatenate(du_sqerr_pool, axis=0)
     print(f"  Pooled cal rows: cu={cu_sqerr_n.shape[0]}  du(flat)={du_sqerr_flt.shape[0]}")
@@ -701,9 +754,9 @@ def main():
     print(f"  CU threshold (p{CU_THRESHOLD_PCT:.1f}): {cu_thr:.4f}")
     print(f"  DU threshold (p{DU_THRESHOLD_PCT:.1f}): {du_thr:.4f}")
 
-    # [6] Transform test topology with the train-fitted scaler ───────────────
-    print(f"\n[6] Transforming TEST topology ({TEST_TOPO}) with train-fitted scaler ...")
-    test_z  = load_npz(TEST_TOPO, "test")
+    # [6] Transform test topology with the train-fitted scaler ────────────────
+    print(f"\n[6] Transforming TEST topology ({test_topo}) with train-fitted scaler ...")
+    test_z  = load_npz(test_topo, "test")
     cu_te, du_te, bid_te = slice_features(test_z)
     cu_s_te, du_s_te, kept_mask, _ = transform_stream(bundle, cu_te, du_te, bid_te)
 
@@ -720,42 +773,62 @@ def main():
         print(f"  NOTE: test N_DU={n_du_te} not in train N_DU set {train_N_set} — "
               "type-shared weights generalise by design")
 
-    # [6b] CU cold-start probe: estimate score baseline shift on test topology ──
-    # Run a short open-loop pass on the first N_PROBE_ROWS test rows (assumed
-    # normal — stress is ~1.6% of the stream so very unlikely to start at t=0).
-    # The median CU score from those rows vs the cal median gives a shift ratio;
-    # we multiply cu_thr by that ratio so the effective FPR on the test topology
-    # matches what the calibration intended.
-    print(f"\n[6b] CU cold-start probe (first {N_PROBE_ROWS} test rows) ...")
+    # [6b] Cold-start probe for CU and DU ────────────────────────────────────
+    print(f"\n[6b] Cold-start probe (first {N_PROBE_ROWS} test rows) ...")
     n_probe = min(N_PROBE_ROWS + 1, len(cu_s_te))
-    cu_sq_probe, _ = phase_infer(model, cu_s_te[:n_probe], du_s_te[:n_probe])
-    probe_scores = lift_score(cu_sq_probe[COLD_START_K:], cu_fn)
-    test_probe_p50 = float(np.percentile(probe_scores, 50))
-    cal_p50        = float(np.percentile(cu_norm_scores, 50))
-    shift_ratio    = test_probe_p50 / max(cal_p50, 1e-9)
-    cu_thr_adj     = cu_thr * max(1.0, shift_ratio)
-    print(f"  CU probe p50: test={test_probe_p50:.4f}  cal={cal_p50:.4f}  "
-          f"shift={shift_ratio:.2f}x  →  CU thr {cu_thr:.4f} → {cu_thr_adj:.4f}")
+    cu_sq_probe, du_sq_probe = phase_infer(model, cu_s_te[:n_probe], du_s_te[:n_probe])
+
+    # CU probe
+    cu_probe_scores   = lift_score(cu_sq_probe[COLD_START_K:], cu_fn)
+    cu_test_p50       = float(np.percentile(cu_probe_scores, 50))
+    cu_cal_p50        = float(np.percentile(cu_norm_scores,  50))
+    cu_shift          = cu_test_p50 / max(cu_cal_p50, 1e-9)
+    cu_thr_adj        = cu_thr * max(1.0, cu_shift)
+    print(f"  CU probe p50: test={cu_test_p50:.4f}  cal={cu_cal_p50:.4f}  "
+          f"shift={cu_shift:.2f}x  →  CU thr {cu_thr:.4f} → {cu_thr_adj:.4f}")
+
+    # DU probe — flatten across DU instances (same as calibration pooling)
+    du_sq_probe_flat  = du_sq_probe[COLD_START_K:].reshape(-1, du_sq_probe.shape[-1])
+    du_probe_scores   = lift_score(du_sq_probe_flat, du_fn)
+    du_test_p50       = float(np.percentile(du_probe_scores, 50))
+    du_cal_p50        = float(np.percentile(du_norm_scores,  50))
+    du_shift          = du_test_p50 / max(du_cal_p50, 1e-9)
+    du_thr_adj = du_thr * np.sqrt(max(1.0, du_shift))
+    print(f"  DU probe p50: test={du_test_p50:.4f}  cal={du_cal_p50:.4f}  "
+          f"shift={du_shift:.2f}x  →  DU thr {du_thr:.4f} → {du_thr_adj:.4f}")
 
     # [7] Sequential inference on full test stream ────────────────────────────
     if CLOSED_LOOP:
         print("\n[7] Running CLOSED-LOOP inference on test stream "
               "(anomalous inputs replaced with model predictions) ...")
         cu_sqerr, du_sqerr = phase_infer_closed_loop(
-            model, cu_s_te, du_s_te, cu_fn, du_fn, cu_thr_adj, du_thr
+            model, cu_s_te, du_s_te, cu_fn, du_fn, cu_thr_adj, du_thr_adj
         )
     else:
         print("\n[7] Running open-loop inference on test stream ...")
         cu_sqerr, du_sqerr = phase_infer(model, cu_s_te, du_s_te)
     print(f"  cu_sqerr {cu_sqerr.shape}  du_sqerr {du_sqerr.shape}")
 
+    if SAVE_ERRORS:
+        feat_tag = f"f{cu_dim}"
+        err_path = Path(f"recon_errors_{test_topo}_{feat_tag}.npz")
+        np.savez(err_path,
+                 cu_sqerr=cu_sqerr, du_sqerr=du_sqerr,
+                 cu_stress=cu_stress, du_stress=du_stress,
+                 cu_feat_norm=cu_fn, du_feat_norm=du_fn,
+                 cu_thr=np.array([cu_thr]),
+                 cu_thr_adj=np.array([cu_thr_adj]),
+                 du_thr=np.array([du_thr]),
+                 du_thr_adj=np.array([du_thr_adj]))
+        print(f"  Errors saved → {err_path}")
+
     # [8] Evaluate ─────────────────────────────────────────────────────────────
     print("\n[8] Evaluation results ...")
-    cu_scores, du_scores, cu_pred, du_pred = phase_evaluate(
-        cu_sqerr, du_sqerr, cu_fn, du_fn, cu_thr_adj, du_thr, cu_stress, du_stress
+    cu_scores, du_scores, cu_pred, du_pred, eval_metrics = phase_evaluate(
+        cu_sqerr, du_sqerr, cu_fn, du_fn, cu_thr_adj, du_thr_adj, cu_stress, du_stress
     )
 
-    # [8b] Diagnostics: score distribution shift + per-channel CU sq-error ────
+    # [8b] Diagnostics ────────────────────────────────────────────────────────
     cu_scores_cal = lift_score(cu_sqerr_n, cu_fn)
     du_scores_cal = lift_score(du_sqerr_flt, du_fn)
     pcts = [50, 90, 99, 99.9]
@@ -770,11 +843,13 @@ def main():
     print(f"  {'DU te ':6s}  " + "  ".join(f"{np.percentile(du_te_scores, p):6.3f}" for p in pcts))
     print(f"  CU thr (cal={cu_thr:.4f}, adj={cu_thr_adj:.4f})  →  "
           f"fraction test above adj thr: {(cu_te_scores > cu_thr_adj).mean():.3f}")
+    print(f"  DU thr (cal={du_thr:.4f}, adj={du_thr_adj:.4f})  →  "
+          f"fraction test above adj thr: {(du_te_scores > du_thr_adj).mean():.3f}")
 
     print("\n[8c] Per-channel CU mean sq-error: CAL vs TEST (normal rows only)")
     cu_sqerr_normal_te = cu_sqerr[COLD_START_K:][cu_stress[COLD_START_K + 1:] == 0]
     print(f"  {'channel':>10s}  {'cal_mean':>10s}  {'te_normal_mean':>14s}  {'ratio':>6s}")
-    feat_names = ["cpu", "mem_pct"] + [f"feat{i}" for i in range(2, cu_sqerr.shape[1])]
+    feat_names = ["cpu", "mem_pct", "net_tx", "net_rx"]
     for c in range(cu_sqerr.shape[1]):
         cal_m = float(np.mean(cu_sqerr_n[:, c]))
         te_m  = float(np.mean(cu_sqerr_normal_te[:, c])) if len(cu_sqerr_normal_te) else float("nan")
@@ -784,9 +859,45 @@ def main():
     # [9] Plot ─────────────────────────────────────────────────────────────────
     print("\n[9] Generating plot ...")
     phase_plot(cu_s_te, du_s_te, cu_stress, du_stress,
-               cu_scores, du_scores, cu_pred, du_pred, cu_thr_adj, du_thr)
+               cu_scores, du_scores, cu_pred, du_pred, cu_thr_adj, du_thr_adj,
+               train_topos, test_topo)
 
     print("\nDone.")
+    return eval_metrics
+
+
+def main():
+    if RUN_ALL_LOO:
+        all_results = []
+        for test_t in ALL_TOPOS:
+            train_ts = [t for t in ALL_TOPOS if t != test_t]
+            result = run_one(train_ts, test_t)
+            all_results.append({"test_topo": test_t, "metrics": result})
+
+        # Collect entity keys in consistent order (CU first, DUs, then ANY last)
+        entity_keys: list = []
+        for r in all_results:
+            for k in r["metrics"]:
+                if k not in entity_keys:
+                    entity_keys.append(k)
+
+        print(f"\n\n{'='*70}")
+        print(f"  LEAVE-ONE-OUT SUMMARY  ({len(ALL_TOPOS)} configurations)")
+        print(f"{'='*70}")
+        header = f"  {'Test topology':<22s}" + "".join(f"  {e+' F1':>10s}" for e in entity_keys)
+        print(header)
+        print(f"  {'-'*68}")
+        for r in all_results:
+            row = f"  {r['test_topo']:<22s}"
+            for e in entity_keys:
+                if e in r["metrics"]:
+                    row += f"  {r['metrics'][e]['f1']:>10.3f}"
+                else:
+                    row += f"  {'N/A':>10s}"
+            print(row)
+        print(f"  {'-'*68}")
+    else:
+        run_one(TRAIN_TOPOS, TEST_TOPO)
 
 
 if __name__ == "__main__":
