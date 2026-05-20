@@ -1,0 +1,31 @@
+# Datasets (large binary files)
+clear_pipeline/output/
+clear_pipeline/data/
+clear_pipeline/CU_CPU_STRESS/
+clear_pipeline/half_traffic_experiment/
+clear_pipeline/short_cpu_stress_experiment/
+
+# Trained model checkpoints
+*.pt
+*.pth
+
+# Generated plots
+*.png
+
+# Python cache
+__pycache__/
+*.pyc
+*.pyo
+.pytest_cache/
+
+# Jupyter
+.ipynb_checkpoints/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Editors
+.vscode/
+.idea/
+*.swp
