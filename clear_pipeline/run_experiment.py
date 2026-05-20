@@ -77,7 +77,7 @@ from scoring import lift_score
 # =============================================================================
 
 ALL_TOPOS     = ["cu0_du0du1", "cu1_du2", "cu2_du3du4du5"]   # all available topologies
-TEST_TOPO     = "cu1_du2"                    # held-out topology; change to try a different split
+TEST_TOPO     = "cu2_du3du4du5"                    # held-out topology; change to try a different split
 TRAIN_TOPOS   = [t for t in ALL_TOPOS if t != TEST_TOPO]      # auto-derived: all except TEST_TOPO
 RUN_ALL_LOO   = False   # True → run all 3 leave-one-out splits sequentially and print a summary table
 
@@ -85,7 +85,7 @@ BASE_DIR      = Path("output")
 
 # Feature slices (cpu only; cpu+mem_pct can be re-enabled once threshold tuning is stable).
 CU_FEAT_SLICE = [0, 1, 5, 6]  # cpu, mem_pct, net_tx, net_rx
-DU_FEAT_SLICE = [0, 1, 5, 6, 10, 12, 32]      # cpu, mem_pct, net_tx, net_rx, bsr, dl_brate, ul_brate
+DU_FEAT_SLICE = [0, 1, 5, 6]     # cpu, net_tx, net_rx
 
 # Preprocessing: RobustScaler v0 (raw values, no delta, no arcsinh).
 PREPROCESS_VERSION = "v0"
@@ -622,11 +622,9 @@ def phase_plot(cu_s_te, du_s_te, cu_stress, du_stress,
         ax_f  = axes[row, 0]
         ax_sc = axes[row, 1]
 
-               # ── feature panel ────────────────────────────────────────────────────
-        _cu_labels = ["cpu", "mem_pct", "tx_ratio", "rx_ratio"]
-        _du_labels = ["cpu", "mem_pct", "net_tx", "net_rx", "bsr", "dl_brate", "ul_brate"]
-        feat_labels = _cu_labels if name == "CU" else _du_labels
-        feat_colors = ["steelblue", "darkorange", "green", "purple","brown", "crimson", "teal"]
+        # ── feature panel ────────────────────────────────────────────────────
+        feat_colors = ["steelblue", "darkorange", "green", "purple"]
+        feat_labels = ["cpu (scaled)", "mem_pct (scaled)", "net_tx (scaled)", "net_rx (scaled)"]
         for fi in range(feat.shape[1]):
             ax_f.plot(t_full, feat[:, fi], color=feat_colors[fi], lw=0.7,
                       label=feat_labels[fi])
