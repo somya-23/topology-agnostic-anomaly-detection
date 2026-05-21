@@ -77,19 +77,34 @@ from scoring import lift_score
 # =============================================================================
 
 ALL_TOPOS     = ["cu0_du0du1", "cu1_du2", "cu2_du3du4du5"]   # all available topologies
-TEST_TOPO     = "cu2_du3du4du5"                    # held-out topology; change to try a different split
+TEST_TOPO     = "cu0_du0du1"                    # held-out topology; change to try a different split
 TRAIN_TOPOS   = [t for t in ALL_TOPOS if t != TEST_TOPO]      # auto-derived: all except TEST_TOPO
 RUN_ALL_LOO   = False   # True → run all 3 leave-one-out splits sequentially and print a summary table
 
-BASE_DIR      = Path("output")
+BASE_DIR      = Path("DU_NET_STRESS")
+STRESS_TYPE   = 3           # 1=CPU | 2=MEM | 3=NET  — must match the test dataset
+STRESS_NAMES  = {1: "CPU", 2: "MEM", 3: "NET"}
 
-# Feature slices (cpu only; cpu+mem_pct can be re-enabled once threshold tuning is stable).
-CU_FEAT_SLICE = [0, 1, 5, 6]  # cpu, mem_pct, net_tx, net_rx
-DU_FEAT_SLICE = [0, 1, 5, 6]     # cpu, net_tx, net_rx
+# Feature slices — all KPIs minus permanently-zero features.
+# Dropped (confirmed 0 in both normal AND stress across all topologies — zero discriminative value):
+#   CU raw 3 (fs_reads), CU raw 4 (fs_writes)
+#   DU raw 3 (fs_reads), DU raw 15,21,22,23,24,25,34,36 (PCI columns always 0)
+CU_FEAT_SLICE = [0, 1, 2, 5, 6]           # cpu, mem_pct, mem_bytes, net_tx, net_rx  (5 features)
+DU_FEAT_SLICE = [0, 1, 2, 4, 5, 6,        # cpu, mem_pct, mem_bytes, fs_writes, net_tx, net_rx
+                 7, 8, 9, 10, 11, 12, 13, 14,           # PCI 0-7
+                 16, 17, 18, 19, 20,                    # PCI 9-13
+                 26, 27, 28, 29, 30, 31, 32, 33, 35]    # PCI 19-26, 28  (28 features total)
+
+# Irate/counter indices in the POST-SLICE arrays (imputation runs after slicing).
+# CU sliced: 0=cpu, 1=mem_pct, 2=mem_bytes, 3=net_tx, 4=net_rx | derived: 5=net_diff, 6=net_ratio
+# DU sliced: 0=cpu, 1=mem_pct, 2=mem_bytes, 3=fs_writes, 4=net_tx, 5=net_rx, 6+=PCI | derived: -2=net_diff, -1=net_ratio
+CU_IRATE_IDX = [0, 3, 4]    # cpu, net_tx, net_rx (mem_pct zeros co-occur with cpu zeros but imputing shrinks feat_norm → amplifies cross-topology mem shift → FPs)
+DU_IRATE_IDX = [0, 3, 4, 5] # cpu, fs_writes, net_tx, net_rx
 
 # Preprocessing: RobustScaler v0 (raw values, no delta, no arcsinh).
 PREPROCESS_VERSION = "v0"
-CU_ZV_IDX = []     # no zero-variance features in the cpu-only slice
+# No zero-variance features remain after dropping the always-0 columns above.
+CU_ZV_IDX = []
 DU_ZV_IDX = []
 
 # Cold-start probe: run open-loop on the first N_PROBE_ROWS of the test stream to
@@ -101,7 +116,7 @@ N_PROBE_ROWS = 500
 EMBED_DIM     = 32
 WINDOW_LEN    = 64
 BATCH_SIZE    = 256             # bumped from 64 to amortize per-batch CUDA kernel-launch overhead
-EPOCHS        = 100
+EPOCHS        = 150
 PATIENCE      = 5
 LR            = 5e-4
 VAL_FRAC      = 0.1             # window-level val for early stopping inside training
@@ -147,22 +162,20 @@ SAVE_ERRORS = True
 # =============================================================================
 
 def load_npz(topo: str, split: str) -> dict:
-    p = BASE_DIR / f"{topo}_stress1" / f"{split}.npz"
+    p = BASE_DIR / f"{topo}_stress{STRESS_TYPE}" / f"{split}.npz"
     assert p.exists(), f"File not found: {p}"
     return dict(np.load(p))
 
 
-def impute_cpu_glitch(arr: np.ndarray, eps: float = 1e-6) -> np.ndarray:
+def impute_cpu_glitch(arr: np.ndarray, irate_idx: list, eps: float = 1e-6) -> np.ndarray:
     arr = arr.copy()
-    dim = arr.shape[1] if arr.ndim == 2 else arr.shape[2]
-    glitch_idx = list(range(dim))
     for t in range(1, len(arr)):
         if arr.ndim == 2:  # CU: (T, dim)
-            glitch = arr[t, glitch_idx] < eps
-            arr[t, glitch_idx] = np.where(glitch, arr[t - 1, glitch_idx], arr[t, glitch_idx])
+            glitch = arr[t, irate_idx] < eps
+            arr[t, irate_idx] = np.where(glitch, arr[t - 1, irate_idx], arr[t, irate_idx])
         else:              # DU: (T, N, dim)
-            glitch = arr[t, :, glitch_idx] < eps
-            arr[t, :, glitch_idx] = np.where(glitch, arr[t - 1, :, glitch_idx], arr[t, :, glitch_idx])
+            glitch = arr[t, :, irate_idx] < eps
+            arr[t, :, irate_idx] = np.where(glitch, arr[t - 1, :, irate_idx], arr[t, :, irate_idx])
     return arr
 
 def slice_features(z: dict):
@@ -188,8 +201,28 @@ def slice_features(z: dict):
     cu = cu[:, CU_FEAT_SLICE]
     du = du[:, :, DU_FEAT_SLICE]
     if IMPUTE:
-        cu = impute_cpu_glitch(cu)
-        du = impute_cpu_glitch(du)
+        cu = impute_cpu_glitch(cu, CU_IRATE_IDX)
+        du = impute_cpu_glitch(du, DU_IRATE_IDX)
+
+    # Derived relational features (post-imputation so glitch zeros are already filled).
+    # net_diff  = net_tx - net_rx : goes negative under packet loss (tx drops, rx stays)
+    # net_ratio = net_tx / net_rx : <1 under packet loss; topology-baseline-invariant
+    # CU post-slice: 3=net_tx, 4=net_rx (already divided by N_DU above)
+    _tx = cu[:, 3:4]
+    _rx = cu[:, 4:5]
+    cu = np.concatenate([cu,
+                         _tx - _rx,                 # net_diff  → position 5
+                         _tx / (_rx + 1e-6)],       # net_ratio → position 6
+                        axis=1)
+
+    # DU post-slice: 4=net_tx, 5=net_rx
+    _du_tx = du[:, :, 4:5]
+    _du_rx = du[:, :, 5:6]
+    du = np.concatenate([du,
+                         _du_tx - _du_rx,             # net_diff  → last-1 position
+                         _du_tx / (_du_rx + 1e-6)],   # net_ratio → last position
+                        axis=2)
+
     block_id = z["block_id"].astype(np.int64)                   # (T,)
     return cu, du, block_id
 
@@ -522,8 +555,8 @@ def phase_evaluate(cu_sqerr, du_sqerr, cu_feat_norm, du_feat_norm,
 
     # Labels: stress at the SAME timesteps (t'+1 shifted to 0-based eval array)
     # cu_stress has length T.  Eval covers timesteps start+1 .. T-1.
-    cu_lbl = (cu_stress[start + 1:] == 1).astype(int)   # (T',)
-    du_lbl = (du_stress[start + 1:] == 1)               # (T', N)
+    cu_lbl = (cu_stress[start + 1:] == STRESS_TYPE).astype(int)   # (T',)
+    du_lbl = (du_stress[start + 1:] == STRESS_TYPE)               # (T', N)
 
     assert len(cu_sqerr_ev) == len(cu_lbl), \
         f"Length mismatch: sqerr {len(cu_sqerr_ev)} vs label {len(cu_lbl)}"
@@ -612,7 +645,7 @@ def phase_plot(cu_s_te, du_s_te, cu_stress, du_stress,
     fig, axes = plt.subplots(len(entities), 2, figsize=(18, 4 * len(entities)),
                              sharex=False)
     fig.suptitle(
-        f"Cross-topology CPU stress detection\n"
+        f"Cross-topology {STRESS_NAMES[STRESS_TYPE]} stress detection\n"
         f"Train: {'+'.join(train_topos)}  →  Test: {test_topo}  "
         f"(v0 preprocessing, CU={len(np.arange(7)[CU_FEAT_SLICE])}feat DU={len(np.arange(37)[DU_FEAT_SLICE])}feat)",
         fontsize=12, y=1.01,
@@ -622,13 +655,18 @@ def phase_plot(cu_s_te, du_s_te, cu_stress, du_stress,
         ax_f  = axes[row, 0]
         ax_sc = axes[row, 1]
 
-        # ── feature panel ────────────────────────────────────────────────────
-        feat_colors = ["steelblue", "darkorange", "green", "purple"]
-        feat_labels = ["cpu (scaled)", "mem_pct (scaled)", "net_tx (scaled)", "net_rx (scaled)"]
+               # ── feature panel ────────────────────────────────────────────────────
+        _cu_labels = ["cpu", "mem_pct", "mem_bytes", "net_tx", "net_rx", "net_diff", "net_ratio"]
+        _du_labels = (["cpu", "mem_pct", "mem_bytes", "fs_writes", "net_tx", "net_rx"]
+                      + [f"pci_{i}" for i in range(22)]
+                      + ["net_diff", "net_ratio"])
+        feat_labels = _cu_labels if name == "CU" else _du_labels
+        _colors_base = ["steelblue", "darkorange", "green", "purple", "brown", "crimson", "teal"]
+        feat_colors = (_colors_base + [f"C{i}" for i in range(feat.shape[1] - len(_colors_base))])
         for fi in range(feat.shape[1]):
             ax_f.plot(t_full, feat[:, fi], color=feat_colors[fi], lw=0.7,
                       label=feat_labels[fi])
-        _shade(ax_f, t_full,  stress_lbl == 1,         "red",    0.20, "GT anomaly")
+        _shade(ax_f, t_full,  stress_lbl == STRESS_TYPE, "red",    0.20, "GT anomaly")
         _shade(ax_f, score_t, pred.astype(bool),        "yellow", 0.40, "Detected")
         # clip y-axis to 5th–95th pct of non-outlier range so startup spikes don't squash the view
         lo = np.percentile(feat[COLD_START_K:], 1)
@@ -642,7 +680,7 @@ def phase_plot(cu_s_te, du_s_te, cu_stress, du_stress,
         # ── score panel ───────────────────────────────────────────────────────
         ax_sc.plot(score_t, scores, color="navy", lw=0.7, label="lift score")
         ax_sc.axhline(thr, color="red", ls="--", lw=1.2, label=f"threshold={thr:.4f}")
-        _shade(ax_sc, score_t, stress_lbl[COLD_START_K + 1:] == 1, "red", 0.20, "GT anomaly")
+        _shade(ax_sc, score_t, stress_lbl[COLD_START_K + 1:] == STRESS_TYPE, "red", 0.20, "GT anomaly")
         ax_sc.set_yscale("log")
         ax_sc.set_ylim(bottom=max(scores[scores > 0].min() * 0.5, 1e-4))
         ax_sc.set_ylabel("lift score (log)", fontsize=9)
@@ -676,7 +714,7 @@ def run_one(train_topos, test_topo):
     du_dim_info = len(np.arange(37)[DU_FEAT_SLICE])
 
     print(f"\n{'='*70}")
-    print(f"  Cross-topology CPU stress detection (multi-train + RobustScaler {PREPROCESS_VERSION})")
+    print(f"  Cross-topology {STRESS_NAMES[STRESS_TYPE]} stress detection (multi-train + RobustScaler {PREPROCESS_VERSION})")
     print(f"  Train : {train_topos}  (normal only, pooled)")
     print(f"  Test  : {test_topo}    (unseen topology)")
     print(f"  Preprocessing : RobustScaler {PREPROCESS_VERSION}  cold-start probe={N_PROBE_ROWS} rows")
@@ -765,9 +803,9 @@ def run_one(train_topos, test_topo):
     n_du_te   = du_s_te.shape[1]
     print(f"  cu_s_te {cu_s_te.shape}  du_s_te {du_s_te.shape}  "
           f"(μ={cu_s_te.mean():+.3f}, σ={cu_s_te.std():.3f})")
-    print(f"  CU cpu-stress rows : {(cu_stress == 1).sum()}")
+    print(f"  CU {STRESS_NAMES[STRESS_TYPE]}-stress rows : {(cu_stress == STRESS_TYPE).sum()}")
     for i in range(n_du_te):
-        print(f"  DU_{i} cpu-stress rows: {(du_stress[:, i] == 1).sum()}")
+        print(f"  DU_{i} {STRESS_NAMES[STRESS_TYPE]}-stress rows: {(du_stress[:, i] == STRESS_TYPE).sum()}")
     train_N_set = sorted({s[1].shape[1] for s in train_streams})
     if n_du_te not in train_N_set:
         print(f"  NOTE: test N_DU={n_du_te} not in train N_DU set {train_N_set} — "
@@ -849,7 +887,7 @@ def run_one(train_topos, test_topo):
     print("\n[8c] Per-channel CU mean sq-error: CAL vs TEST (normal rows only)")
     cu_sqerr_normal_te = cu_sqerr[COLD_START_K:][cu_stress[COLD_START_K + 1:] == 0]
     print(f"  {'channel':>10s}  {'cal_mean':>10s}  {'te_normal_mean':>14s}  {'ratio':>6s}")
-    feat_names = ["cpu", "mem_pct", "net_tx", "net_rx"]
+    feat_names = ["cpu", "mem_pct", "mem_bytes", "net_tx", "net_rx", "net_diff", "net_ratio"]
     for c in range(cu_sqerr.shape[1]):
         cal_m = float(np.mean(cu_sqerr_n[:, c]))
         te_m  = float(np.mean(cu_sqerr_normal_te[:, c])) if len(cu_sqerr_normal_te) else float("nan")
