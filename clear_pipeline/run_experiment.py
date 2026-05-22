@@ -77,12 +77,12 @@ from scoring import lift_score
 # =============================================================================
 
 ALL_TOPOS     = ["cu0_du0du1", "cu1_du2", "cu2_du3du4du5"]   # all available topologies
-TEST_TOPO     = "cu2_du3du4du5"                    # held-out topology; change to try a different split
+TEST_TOPO     = "cu0_du0du1"                    # held-out topology; change to try a different split
 TRAIN_TOPOS   = [t for t in ALL_TOPOS if t != TEST_TOPO]      # auto-derived: all except TEST_TOPO
-RUN_ALL_LOO   = False   # True → run all 3 leave-one-out splits sequentially and print a summary table
+RUN_ALL_LOO   = True   # True → run all 3 leave-one-out splits sequentially and print a summary table
 
-BASE_DIR      = Path("DU_CPU_bidir_STRESS")
-STRESS_TYPE   = 1           # 1=CPU | 2=MEM | 3=NET  — must match the test dataset
+BASE_DIR      = Path("DU_MEM_bidir_STRESS")
+STRESS_TYPE   = 2           # 1=CPU | 2=MEM | 3=NET  — must match the test dataset
 STRESS_NAMES  = {1: "CPU", 2: "MEM", 3: "NET"}
 
 # Feature slices — all KPIs minus permanently-zero features.
