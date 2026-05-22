@@ -44,13 +44,13 @@ import pandas as pd
 # USER INPUTS — change these only
 # =============================================================================
 
-TRAIN_CSV   = Path("/home/somya/workspace/thesis3/topoar_gpu_run/clear_pipeline/data/cu_stress_normal_exp.csv")
-TEST_CSV    = Path("/home/somya/workspace/thesis3/topoar_gpu_run/clear_pipeline/data/cu_cpu_stress_anomalous_exp.csv")
+TRAIN_CSV   = Path("/home/somya/workspace/thesis3/topoar_gpu_run/clear_pipeline/data/normal_bidir_1_exp.csv")
+TEST_CSV    = Path("/home/somya/workspace/thesis3/topoar_gpu_run/clear_pipeline/data/du_cpu_anomalous_bidir_1_exp.csv")
 
-TOPOLOGY    = "cu1_du2"   # options: "cu0_du0du1" | "cu1_du2" | "cu2_du3du4du5"
+TOPOLOGY    = "cu0_du0du1"   # options: "cu0_du0du1" | "cu1_du2" | "cu2_du3du4du5"
 STRESS_TYPE = 1           # 1=CPU | 2=MEM | 3=NET
 
-OUT_DIR     = Path("CU_CPU_STRESS") / f"{TOPOLOGY}_stress{STRESS_TYPE}"
+OUT_DIR     = Path("DU_CPU_bidir_STRESS") / f"{TOPOLOGY}_stress{STRESS_TYPE}"
 
 # =============================================================================
 # TOPOLOGY REGISTRY — add new topologies here if needed

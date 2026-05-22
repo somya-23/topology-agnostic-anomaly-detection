@@ -77,12 +77,12 @@ from scoring import lift_score
 # =============================================================================
 
 ALL_TOPOS     = ["cu0_du0du1", "cu1_du2", "cu2_du3du4du5"]   # all available topologies
-TEST_TOPO     = "cu0_du0du1"                    # held-out topology; change to try a different split
+TEST_TOPO     = "cu2_du3du4du5"                    # held-out topology; change to try a different split
 TRAIN_TOPOS   = [t for t in ALL_TOPOS if t != TEST_TOPO]      # auto-derived: all except TEST_TOPO
 RUN_ALL_LOO   = False   # True → run all 3 leave-one-out splits sequentially and print a summary table
 
-BASE_DIR      = Path("DU_NET_STRESS")
-STRESS_TYPE   = 3           # 1=CPU | 2=MEM | 3=NET  — must match the test dataset
+BASE_DIR      = Path("DU_CPU_bidir_STRESS")
+STRESS_TYPE   = 1           # 1=CPU | 2=MEM | 3=NET  — must match the test dataset
 STRESS_NAMES  = {1: "CPU", 2: "MEM", 3: "NET"}
 
 # Feature slices — all KPIs minus permanently-zero features.
@@ -110,7 +110,7 @@ DU_ZV_IDX = []
 # Cold-start probe: run open-loop on the first N_PROBE_ROWS of the test stream to
 # estimate how much the CU score distribution shifted vs cal (cross-topology baseline
 # shift), then scale the CU threshold accordingly before the closed-loop run.
-N_PROBE_ROWS = 500
+N_PROBE_ROWS = 300
 
 # Model hyperparameters
 EMBED_DIM     = 32
@@ -144,6 +144,8 @@ DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
 # keeping the prediction anchored to normal behaviour throughout the stress
 # window.  Set to False to revert to the original open-loop inference.
 CLOSED_LOOP = True
+
+BIDIR = "bidir" in BASE_DIR.name   # derived from BASE_DIR name; True when directory contains "bidir"
 
 # Prometheus irate glitch imputation: forward-fill rows where raw cpu/mem == 0.0.
 # WARNING: enabling this currently breaks results because feat_norm shrinks ~177×
@@ -709,7 +711,7 @@ def run_one(train_topos, test_topo):
     Returns:     dict mapping entity name → {tp, fp, fn, p, r, f1, anom}
                  e.g. {"CU": {...}, "DU_0": {...}, "ANY": {...}}
     """
-    model_ckpt = Path(f"model_ckpt_test_{test_topo}.pt")   # per-split; delete to retrain
+    model_ckpt = Path(f"{'bidr_' if BIDIR else ''}model_ckpt_test_{test_topo}.pt")   # per-split; delete to retrain
     cu_dim_info = len(np.arange(7)[CU_FEAT_SLICE])
     du_dim_info = len(np.arange(37)[DU_FEAT_SLICE])
 
