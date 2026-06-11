@@ -29,3 +29,8 @@ Thumbs.db
 .vscode/
 .idea/
 *.swp
+# Dataset variants (large binary .npz)
+clear_pipeline/*_STRESS/
+# Reconstruction-error dumps and run artifacts
+clear_pipeline/*.npz
+clear_pipeline/exp_runs/

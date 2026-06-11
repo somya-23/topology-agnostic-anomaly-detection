@@ -64,12 +64,12 @@ from scoring          import lift_score
 # =============================================================================
 
 ALL_TOPOS   = ["cu0_du0du1", "cu1_du2", "cu2_du3du4du5"]
-TEST_TOPO   = "cu2_du3du4du5"
+TEST_TOPO   = "cu1_du2"
 TRAIN_TOPOS = [t for t in ALL_TOPOS if t != TEST_TOPO]
-RUN_ALL_LOO = True
+RUN_ALL_LOO = False
 
-BASE_DIR    = Path("DU_MEM_bidir_STRESS")
-STRESS_TYPE = 2
+BASE_DIR    = Path("CU_NET_bidir_STRESS")
+STRESS_TYPE = 3
 STRESS_NAMES = {1: "CPU", 2: "MEM", 3: "NET"}
 
 CU_FEAT_SLICE = [0, 1, 2, 5, 6]
@@ -509,6 +509,18 @@ def run_one(train_topos, test_topo):
                  cu_thr=np.array([cu_thr]), cu_thr_adj=np.array([cu_thr_adj]),
                  du_thr=np.array([du_thr]), du_thr_adj=np.array([du_thr_adj]))
         print(f"  Errors saved → {err_path}")
+
+    # [7b] Ablation: same errors, raw (unadjusted) thresholds
+    # Difference vs [8] below isolates the cold-start probe's contribution.
+    print("\n[7b] ABLATION — raw threshold (no cold-start probe adjustment) ...")
+    _, _, _, _, metrics_raw = phase_evaluate(
+        cu_sqerr, du_sqerr, cu_fn, du_fn,
+        cu_thr, du_thr,
+        cu_stress, du_stress,
+    )
+    print("  [ABLATION raw-thr] " + "  ".join(
+        f"{k}={v['f1']:.3f}" for k, v in metrics_raw.items()
+    ))
 
     # [8] Evaluate
     print("\n[8] Evaluation ...")

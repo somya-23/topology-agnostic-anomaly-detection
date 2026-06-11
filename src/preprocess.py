@@ -59,6 +59,9 @@ class PreprocessBundle:
 VERSION_FLAGS: Dict[str, Tuple[bool, bool, bool]] = {
     # version: (use_delta, use_arcsinh, use_clip)
     "v0": (False, False, False),
+    # v0_dunorm: same raw transform as v0; CU net normalization is learned inside
+    # the model (W_DU softplus), not done here.
+    "v0_dunorm": (False, False, False),
     "v1": (True,  False, False),
     "v2": (True,  True,  False),
     "v3": (True,  True,  True),

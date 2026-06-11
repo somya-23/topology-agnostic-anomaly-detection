@@ -559,6 +559,18 @@ def run_one(train_topos, test_topo):
                  du_thr=np.array([du_thr]), du_thr_adj=np.array([du_thr_adj]))
         print(f"  Errors saved → {err_path}")
 
+    # [7b] Ablation: same errors, raw (unadjusted) thresholds
+    # Difference vs [8] below isolates the cold-start probe's contribution.
+    print("\n[7b] ABLATION — raw threshold (no cold-start probe adjustment) ...")
+    _, _, _, _, metrics_raw = phase_evaluate(
+        cu_sqerr, du_sqerr, cu_fn, du_fn,
+        cu_thr, du_thr,
+        cu_stress, du_stress,
+    )
+    print("  [ABLATION raw-thr] " + "  ".join(
+        f"{k}={v['f1']:.3f}" for k, v in metrics_raw.items()
+    ))
+
     # [8] Evaluate
     print("\n[8] Evaluation ...")
     cu_scores, du_scores, cu_pred, du_pred, eval_metrics = phase_evaluate(

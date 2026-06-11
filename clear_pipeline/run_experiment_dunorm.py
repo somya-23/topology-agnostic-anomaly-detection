@@ -42,7 +42,7 @@ FLOW
 ----
   [1] Fit preprocessing on TRAIN topology normal data (with CPU glitch imputation).
   [2] Split train stream into (train_fit, cal) by row index — last CAL_FRAC is cal.
-  [3] Train CalibratedTopoAR on train_fit only.
+  [3] Train DUNormTopoAR on train_fit only.
   [4] Run inference on the held-out cal stream → calibrate feat_norm + threshold.
   [5] Apply the SAME scalers to TEST topology (no refit; imputation also applied).
   [6] Run sequential LSTM inference on the full TEST stream.
@@ -56,7 +56,6 @@ USAGE
 
 import sys
 import os
-import csv
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "src"))
 
 from pathlib import Path
@@ -69,7 +68,8 @@ matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 
 from preprocess import fit_bundle, transform_stream, causal_rolling_normalize
-from model_calibrated import CalibratedTopoAR, feat_norm_calibrated, dual_threshold_from_val
+from model_calibrated import feat_norm_calibrated, dual_threshold_from_val
+from model_dunorm    import DUNormTopoAR
 from dataset import TopologySequenceDataset, MultiTopologyBatchSampler, collate_windows
 from scoring import lift_score
 
@@ -80,10 +80,10 @@ from scoring import lift_score
 ALL_TOPOS     = ["cu0_du0du1", "cu1_du2", "cu2_du3du4du5"]   # all available topologies
 TEST_TOPO     = "cu1_du2"                    # held-out topology; change to try a different split
 TRAIN_TOPOS   = [t for t in ALL_TOPOS if t != TEST_TOPO]      # auto-derived: all except TEST_TOPO
-RUN_ALL_LOO   = True   # True → run all 3 leave-one-out splits sequentially and print a summary table
+RUN_ALL_LOO   = False   # True → run all 3 leave-one-out splits sequentially and print a summary table
 
-BASE_DIR      = Path("CU_NET_random_STRESS")
-STRESS_TYPE   = 3         # 1=CPU | 2=MEM | 3=NET  — must match the test dataset
+BASE_DIR      = Path("CU_NET_bidir_STRESS")
+STRESS_TYPE   = 3           # 1=CPU | 2=MEM | 3=NET  — must match the test dataset
 STRESS_NAMES  = {1: "CPU", 2: "MEM", 3: "NET"}
 
 # Feature slices — all KPIs minus permanently-zero features.
@@ -97,13 +97,15 @@ DU_FEAT_SLICE = [0, 1, 2, 4, 5, 6,        # cpu, mem_pct, mem_bytes, fs_writes, 
                  26, 27, 28, 29, 30, 31, 32, 33, 35]    # PCI 19-26, 28  (28 features total)
 
 # Irate/counter indices in the POST-SLICE arrays (imputation runs after slicing).
-# CU sliced: 0=cpu, 1=mem_pct, 2=mem_bytes, 3=net_tx, 4=net_rx | derived: 5=net_diff, 6=net_ratio
+# CU sliced: 0=cpu, 1=mem_pct, 2=mem_bytes, 3=net_tx (raw), 4=net_rx (raw) | derived: 5=net_ratio
 # DU sliced: 0=cpu, 1=mem_pct, 2=mem_bytes, 3=fs_writes, 4=net_tx, 5=net_rx, 6+=PCI | derived: -2=net_diff, -1=net_ratio
 CU_IRATE_IDX = [0, 3, 4]    # cpu, net_tx, net_rx (mem_pct zeros co-occur with cpu zeros but imputing shrinks feat_norm → amplifies cross-topology mem shift → FPs)
 DU_IRATE_IDX = [0, 3, 4, 5] # cpu, fs_writes, net_tx, net_rx
 
-# Preprocessing: RobustScaler v0 (raw values, no delta, no arcsinh).
-PREPROCESS_VERSION = "v0"
+# Preprocessing: RobustScaler v0_dunorm (no /N_DU on CU net; no CU net_diff —
+# the model's W_DU produces a per-DU softplus scalar whose sum normalizes CU
+# net_tx/net_rx inside the model, as a learned data-driven substitute for /N).
+PREPROCESS_VERSION = "v0_dunorm"
 # No zero-variance features remain after dropping the always-0 columns above.
 CU_ZV_IDX = []
 DU_ZV_IDX = []
@@ -134,15 +136,14 @@ DU_THRESHOLD_PCT = 99.9         # same as CU — safe now that glitch spikes are
 
 DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
 
-BIDIR = "bidir" in BASE_DIR.name   # derived from BASE_DIR name; True when directory contains "bidir"
+# Closed-loop inference: when an entity is detected as anomalous, its actual
+# input is replaced by the model's own prediction for the next step.  This
+# prevents the LSTM hidden state from adapting to a sustained anomaly level,
+# keeping the prediction anchored to normal behaviour throughout the stress
+# window.  Set to False to revert to the original open-loop inference.
+CLOSED_LOOP = True
 
-# Dataset-variant tag = the tokens between the stress TYPE and trailing "STRESS".
-#   CU_CPU_STRESS       -> ""        CU_CPU_diff_STRESS  -> "diff"   CU_CPU_bidir_STRESS -> "bidir"
-# Used to namespace checkpoints / plots / recon-errors / CSV so different datasets
-# (e.g. the diff-traffic run) never overwrite each other's artifacts.
-DATA_VARIANT = "_".join(BASE_DIR.name.split("_")[2:-1])
-# Filename prefix. Keep the legacy "bidr_" spelling for bidir runs; otherwise use the tag.
-CKPT_PREFIX  = "bidr_" if BIDIR else (f"{DATA_VARIANT}_" if DATA_VARIANT else "")
+BIDIR = "bidir" in BASE_DIR.name   # derived from BASE_DIR name; True when directory contains "bidir"
 
 # Prometheus irate glitch imputation: forward-fill rows where raw cpu/mem == 0.0.
 # WARNING: enabling this currently breaks results because feat_norm shrinks ~177×
@@ -151,7 +152,7 @@ CKPT_PREFIX  = "bidr_" if BIDIR else (f"{DATA_VARIANT}_" if DATA_VARIANT else ""
 # test cold-start too (not yet implemented).  Leave False until that is fixed.
 IMPUTE = True
 
-# Save reconstruction errors after inference so plot_recon_comparison.py
+# Save reconstruction errors after closed-loop inference so plot_recon_comparison.py
 # can overlay cpu-only vs cpu+mem results in a single figure.
 # Files are named  recon_errors_{test_topo}_f{cu_dim}.npz  (f1=cpu-only, f2=cpu+mem).
 SAVE_ERRORS = True
@@ -178,43 +179,39 @@ def impute_cpu_glitch(arr: np.ndarray, irate_idx: list, eps: float = 1e-6) -> np
     return arr
 
 def slice_features(z: dict):
-    """Apply CU/DU feature slices and return (cu, du, block_id)."""
+    """Apply CU/DU feature slices and return (cu, du, block_id).
+
+    DUNorm variant changes vs run_experiment.py:
+      * NO /N_DU division on CU net_tx, net_rx — raw values feed the model.
+        The model computes its own sum_extra (softplus of W_DU's extra dim,
+        summed across DUs) and divides net_tx, net_rx by it INSIDE the model.
+      * NO CU net_diff derived feature. Only CU net_ratio kept.
+    DU-side features and derived (net_diff, net_ratio per-DU) are unchanged.
+
+    Resulting CU feature order (cu_dim = 6):
+       0=cpu  1=mem_pct  2=mem_bytes  3=net_tx (raw)  4=net_rx (raw)  5=net_ratio
+    (Indices 3, 4 must match DUNormTopoAR.NET_TX_IDX / NET_RX_IDX.)
+    """
     cu       = z["cu"].astype(np.float32)
     du       = z["du"].astype(np.float32)
-    
-    N_DU = du.shape[1]
 
-    # -----------------------------------------------------------------
-    # TOPOLOGY NORMALIZATION
-    # -----------------------------------------------------------------
-    # Raw CU net traffic scales almost linearly with DU count.
-    # Normalize traffic features by topology size.
-    #
-    # feature index:
-    #   5 = net_tx
-    #   6 = net_rx
-    # -----------------------------------------------------------------
+    # /N_DU on CU net intentionally removed — replaced by the model's learned
+    # sum_extra normalization inside DUNormTopoAR.project_tokens().
 
-    cu[:, 5] = cu[:, 5] / N_DU
-    cu[:, 6] = cu[:, 6] / N_DU
     cu = cu[:, CU_FEAT_SLICE]
     du = du[:, :, DU_FEAT_SLICE]
     if IMPUTE:
         cu = impute_cpu_glitch(cu, CU_IRATE_IDX)
         du = impute_cpu_glitch(du, DU_IRATE_IDX)
 
-    # Derived relational features (post-imputation so glitch zeros are already filled).
-    # net_diff  = net_tx - net_rx : goes negative under packet loss (tx drops, rx stays)
-    # net_ratio = net_tx / net_rx : <1 under packet loss; topology-baseline-invariant
-    # CU post-slice: 3=net_tx, 4=net_rx (already divided by N_DU above)
+    # CU derived: keep ONLY net_ratio (drop net_diff). CU post-slice: 3=net_tx, 4=net_rx.
     _tx = cu[:, 3:4]
     _rx = cu[:, 4:5]
     cu = np.concatenate([cu,
-                         _tx - _rx,                 # net_diff  → position 5
-                         _tx / (_rx + 1e-6)],       # net_ratio → position 6
+                         _tx / (_rx + 1e-6)],       # net_ratio → position 5
                         axis=1)
 
-    # DU post-slice: 4=net_tx, 5=net_rx
+    # DU derived (unchanged from run_experiment.py). DU post-slice: 4=net_tx, 5=net_rx.
     _du_tx = du[:, :, 4:5]
     _du_rx = du[:, :, 5:6]
     du = np.concatenate([du,
@@ -266,7 +263,7 @@ def phase_preprocess(train_zs, train_topos):
 # Early stopping on validation loss.
 # =============================================================================
 
-def phase_train(fit_streams, train_topos, model_ckpt) -> CalibratedTopoAR:
+def phase_train(fit_streams, train_topos, model_ckpt) -> DUNormTopoAR:
     """Train on multiple topologies with N-homogeneous batches.
 
     Args:
@@ -309,7 +306,7 @@ def phase_train(fit_streams, train_topos, model_ckpt) -> CalibratedTopoAR:
     )
 
     torch.manual_seed(SEED)
-    model = CalibratedTopoAR(cu_dim=cu_dim, du_dim=du_dim, embed_dim=EMBED_DIM).to(DEVICE)
+    model = DUNormTopoAR(cu_dim=cu_dim, du_dim=du_dim, embed_dim=EMBED_DIM).to(DEVICE)
     optim = torch.optim.Adam(model.parameters(), lr=LR)
 
     best_val_loss  = float("inf")
@@ -381,7 +378,7 @@ def phase_train(fit_streams, train_topos, model_ckpt) -> CalibratedTopoAR:
 # Both arrays have shape (T-1, ...) covering error at timesteps 1..T-1.
 # =============================================================================
 
-def phase_infer(model: CalibratedTopoAR, cu_s: np.ndarray, du_s: np.ndarray):
+def phase_infer(model: DUNormTopoAR, cu_s: np.ndarray, du_s: np.ndarray):
     model.eval()
     cu_t = torch.tensor(cu_s).unsqueeze(0).to(DEVICE)   # (1, T, cu_dim)
     du_t = torch.tensor(du_s).unsqueeze(0).to(DEVICE)   # (1, T, N, du_dim)
@@ -394,6 +391,99 @@ def phase_infer(model: CalibratedTopoAR, cu_s: np.ndarray, du_s: np.ndarray):
     du_sqerr = (du_hat[0, :-1] - du_t[0, 1:]).pow(2).cpu().numpy()   # (T-1, N, du_dim)
     return cu_sqerr, du_sqerr
 
+
+# =============================================================================
+# PHASE 3b: CLOSED-LOOP SEQUENTIAL INFERENCE
+#
+# Root cause of DU miss: LSTM is a next-step predictor. When DU stress is
+# sustained for ~177 steps, after the first 1-2 steps the LSTM hidden state
+# tracks the elevated CPU value and starts predicting it correctly → sqerr≈0
+# → score drops below threshold → all subsequent stress timesteps are missed.
+#
+# Fix: when an entity's score exceeds the threshold at step t, replace its
+# actual input at t+1 with the model's own prediction (what normal looks like).
+# The LSTM hidden state then stays anchored to normal behaviour, so actual
+# (still-high) CPU values keep diverging from the prediction throughout the
+# entire stress window → score stays elevated → detections continue.
+#
+# Important: error is always (prediction - ACTUAL), not vs the substituted
+# input, so evaluation metrics are not artificially inflated.
+#
+# Calibration inference (phase_infer above) is unchanged — the cal stream is
+# all-normal, so no replacement ever fires there.
+# =============================================================================
+
+def phase_infer_closed_loop(
+    model: DUNormTopoAR,
+    cu_s: np.ndarray,
+    du_s: np.ndarray,
+    cu_feat_norm: np.ndarray,
+    du_feat_norm: np.ndarray,
+    cu_thr: float,
+    du_thr: float,
+):
+    model.eval()
+    T  = len(cu_s)
+    N  = du_s.shape[1]
+
+    cu_sqerrs = np.zeros((T - 1, cu_s.shape[1]),    dtype=np.float32)
+    du_sqerrs = np.zeros((T - 1, N, du_s.shape[2]), dtype=np.float32)
+
+    h, c = model.init_state(1, DEVICE)
+    # Require K consecutive anomalous timesteps before closed-loop replacement.
+    DU_HYSTERESIS = 5
+    du_anom_count = np.zeros(N, dtype=np.int32)
+
+    CU_HYSTERESIS = 5
+    cu_anom_count = 0
+
+    # Feed actual values at t=0 to warm the LSTM
+    cu_in = torch.tensor(cu_s[[0]], dtype=torch.float32).to(DEVICE)  # (1, cu_dim)
+    du_in = torch.tensor(du_s[[0]], dtype=torch.float32).to(DEVICE)  # (1, N, du_dim)
+
+    with torch.no_grad():
+        for t in range(T - 1):
+            cu_tok, du_tok = model.project_tokens(cu_in, du_in)
+            cu_hat, du_hat, h, c, _ = model.step(cu_tok, du_tok, h, c)
+
+            # Actual values at the NEXT timestep
+            cu_next = torch.tensor(cu_s[[t + 1]], dtype=torch.float32).to(DEVICE)
+            du_next = torch.tensor(du_s[[t + 1]], dtype=torch.float32).to(DEVICE)
+
+            # Error always measured against actual (not against substituted input)
+            cu_err = (cu_hat - cu_next).pow(2).cpu().numpy()[0]  # (cu_dim,)
+            du_err = (du_hat - du_next).pow(2).cpu().numpy()[0]  # (N, du_dim)
+            cu_sqerrs[t] = cu_err
+            du_sqerrs[t] = du_err
+
+            # Score each entity and decide the input for step t+1
+            cu_score = float((cu_err / cu_feat_norm).max())
+
+            if cu_score > cu_thr:
+                cu_anom_count += 1
+            else:
+                cu_anom_count = 0
+
+            if cu_anom_count >= CU_HYSTERESIS:
+                cu_in = cu_hat
+            else:
+                cu_in = cu_next
+
+            du_in = du_next.clone()
+
+            for i in range(N):
+                du_score_i = float((du_err[i] / du_feat_norm).max())
+
+                if du_score_i > du_thr:
+                    du_anom_count[i] += 1
+                else:
+                    du_anom_count[i] = 0
+
+                # Enter closed-loop only after K consecutive anomaly steps
+                if du_anom_count[i] >= DU_HYSTERESIS:
+                    du_in[0, i] = du_hat[0, i]
+
+    return cu_sqerrs, du_sqerrs
 
 # =============================================================================
 # PHASE 4: CALIBRATE THRESHOLDS ON HELD-OUT TRAIN-CAL STREAM
@@ -508,63 +598,6 @@ def phase_evaluate(cu_sqerr, du_sqerr, cu_feat_norm, du_feat_norm,
     return cu_scores, du_scores, cu_pred, du_pred, all_metrics
 
 # =============================================================================
-# ROOT CAUSE KPI
-# =============================================================================
-
-_CU_FEAT_NAMES = ["cpu", "mem_pct", "mem_bytes", "net_tx", "net_rx", "net_diff", "net_ratio"]
-_DU_FEAT_NAMES = (["cpu", "mem_pct", "mem_bytes", "fs_writes", "net_tx", "net_rx"]
-                  + [f"pci_{i}" for i in range(22)]
-                  + ["net_diff", "net_ratio"])
-
-# For each stress type: which feature indices in the post-slice/post-derive arrays count as correct RC.
-# NET: tx(3)/rx(4)/diff(5)/ratio(6) for CU; tx(4)/rx(5)/diff(28)/ratio(29) for DU.
-_RC_FEAT_GROUPS = {
-    1: {"CU": {0},              "DU": {0}},
-    2: {"CU": {2},              "DU": {2}},   # mem_bytes (idx 2) is the dominant signal for MEM stress
-    3: {"CU": {3, 4, 5, 6},    "DU": {4, 5, 28, 29}},
-}
-
-
-def phase_root_cause(cu_sqerr_ev, du_sqerr_ev, cu_fn, du_fn, cu_pred, du_pred, cu_lbl, du_lbl):
-    """Print RC-KPI accuracy: fraction of TPs where argmax normalized error matches stress type."""
-    N = du_sqerr_ev.shape[1]
-    rc_groups = _RC_FEAT_GROUPS.get(STRESS_TYPE)
-    if rc_groups is None:
-        print(f"\n[8a] Root cause KPI: no mapping defined for STRESS_TYPE={STRESS_TYPE}")
-        return
-
-    rca_metrics = {}
-
-    def _rc_acc(sqerr_ev, feat_norm, pred, lbl, valid_feats, feat_names, ent_name):
-        tp_mask = pred.astype(bool) & lbl.astype(bool)
-        n_tp = int(tp_mask.sum())
-        if n_tp == 0:
-            print(f"  {ent_name:<12s}  TPs=     0  RC_correct=       0/0   (  N/A)  dominant_pred_RC=—")
-            rca_metrics[ent_name] = {"rc_correct": 0, "rc_total": 0, "rc_pct": float("nan"), "dominant_rc": "—"}
-            return
-        norm_err  = sqerr_ev[tp_mask] / feat_norm          # (n_tp, dim)
-        rc_idx    = np.argmax(norm_err, axis=1)             # (n_tp,) — argmax per TP timestep
-        rc_correct = np.isin(rc_idx, list(valid_feats))
-        n_correct  = int(rc_correct.sum())
-        pct        = 100.0 * n_correct / n_tp
-        counts     = np.bincount(rc_idx, minlength=len(feat_names))
-        top_feat   = feat_names[int(np.argmax(counts))]
-        print(f"  {ent_name:<12s}  TPs={n_tp:>6d}  RC_correct={n_correct:>6d}/{n_tp:<6d}"
-              f"  ({pct:5.1f}%)  dominant_pred_RC={top_feat}")
-        rca_metrics[ent_name] = {"rc_correct": n_correct, "rc_total": n_tp, "rc_pct": pct, "dominant_rc": top_feat}
-
-    expected_cu = "|".join(_CU_FEAT_NAMES[f] for f in sorted(rc_groups["CU"]))
-    print(f"\n[8a] Root cause KPI accuracy (stress={STRESS_NAMES[STRESS_TYPE]}, "
-          f"expected_CU={expected_cu}) ...")
-    print(f"  {'Entity':<12s}  {'TPs':>6s}  {'RC_correct':>20s}  {'dominant_pred_RC':>18s}")
-    print(f"  {'-'*64}")
-    _rc_acc(cu_sqerr_ev, cu_fn, cu_pred, cu_lbl, rc_groups["CU"], _CU_FEAT_NAMES, "CU")
-    for i in range(N):
-        _rc_acc(du_sqerr_ev[:, i, :], du_fn, du_pred[:, i], du_lbl[:, i],
-                rc_groups["DU"], _DU_FEAT_NAMES, f"DU_{i}")
-    return rca_metrics
-
-# =============================================================================
 # PLOTTING
 # =============================================================================
 
@@ -619,7 +652,7 @@ def phase_plot(cu_s_te, du_s_te, cu_stress, du_stress,
         ax_sc = axes[row, 1]
 
                # ── feature panel ────────────────────────────────────────────────────
-        _cu_labels = ["cpu", "mem_pct", "mem_bytes", "net_tx", "net_rx", "net_diff", "net_ratio"]
+        _cu_labels = ["cpu", "mem_pct", "mem_bytes", "net_tx", "net_rx", "net_ratio"]
         _du_labels = (["cpu", "mem_pct", "mem_bytes", "fs_writes", "net_tx", "net_rx"]
                       + [f"pci_{i}" for i in range(22)]
                       + ["net_diff", "net_ratio"])
@@ -654,7 +687,7 @@ def phase_plot(cu_s_te, du_s_te, cu_stress, du_stress,
         axes[-1, col].set_xlabel("Timestep", fontsize=9)
 
     plt.tight_layout()
-    out = Path(f"cross_anomaly_plot_{CKPT_PREFIX}{test_topo}.png")
+    out = Path(f"cross_anomaly_plot_{test_topo}.png")
     plt.savefig(out, dpi=150, bbox_inches="tight")
     print(f"\n  Plot saved → {out.resolve()}")
     plt.close()
@@ -672,7 +705,7 @@ def run_one(train_topos, test_topo):
     Returns:     dict mapping entity name → {tp, fp, fn, p, r, f1, anom}
                  e.g. {"CU": {...}, "DU_0": {...}, "ANY": {...}}
     """
-    model_ckpt = Path(f"{CKPT_PREFIX}model_ckpt_test_{test_topo}.pt")   # per-split; delete to retrain
+    model_ckpt = Path(f"{'bidr_' if BIDIR else ''}dunorm_model_ckpt_test_{test_topo}.pt")   # per-split; delete to retrain
     cu_dim_info = len(np.arange(7)[CU_FEAT_SLICE])
     du_dim_info = len(np.arange(37)[DU_FEAT_SLICE])
 
@@ -707,7 +740,7 @@ def run_one(train_topos, test_topo):
     du_dim = fit_streams[0][1].shape[2]
     if model_ckpt.exists():
         print(f"\n[3] Loading model from checkpoint ({model_ckpt}) — delete to retrain ...")
-        ckpt = torch.load(model_ckpt, map_location='cpu')
+        ckpt = torch.load(model_ckpt, map_location=DEVICE)
         mismatches = []
         if ckpt.get("topos") != list(train_topos):
             mismatches.append(f"topos: ckpt={ckpt.get('topos')} vs current={list(train_topos)}")
@@ -725,11 +758,11 @@ def run_one(train_topos, test_topo):
                 + "\n    ".join(mismatches)
                 + f"\n  Delete {model_ckpt} and rerun to retrain from scratch."
             )
-        model = CalibratedTopoAR(cu_dim=ckpt["cu_dim"], du_dim=ckpt["du_dim"],
+        model = DUNormTopoAR(cu_dim=ckpt["cu_dim"], du_dim=ckpt["du_dim"],
                                  embed_dim=ckpt["embed_dim"]).to(DEVICE)
         model.load_state_dict(ckpt["state_dict"])
     else:
-        print(f"\n[3] Training CalibratedTopoAR on {len(train_topos)} topologies "
+        print(f"\n[3] Training DUNormTopoAR on {len(train_topos)} topologies "
               f"(cu_dim={cu_dim}, du_dim={du_dim}, embed={EMBED_DIM}) ...")
         model = phase_train(fit_streams, train_topos, model_ckpt)
 
@@ -780,17 +813,20 @@ def run_one(train_topos, test_topo):
     # it inflated the CU threshold ~20× and zeroed real detections. Cross-topology
     # baseline shift is handled by the pooled-train RobustScaler + type-shared /N
     # normalization, not by an inference-time threshold band-aid.
-    print("\n[7] Running inference on test stream ...")
-    cu_sqerr, du_sqerr = phase_infer(model, cu_s_te, du_s_te)
+    if CLOSED_LOOP:
+        print("\n[7] Running CLOSED-LOOP inference on test stream "
+              "(anomalous inputs replaced with model predictions) ...")
+        cu_sqerr, du_sqerr = phase_infer_closed_loop(
+            model, cu_s_te, du_s_te, cu_fn, du_fn, cu_thr, du_thr
+        )
+    else:
+        print("\n[7] Running open-loop inference on test stream ...")
+        cu_sqerr, du_sqerr = phase_infer(model, cu_s_te, du_s_te)
     print(f"  cu_sqerr {cu_sqerr.shape}  du_sqerr {du_sqerr.shape}")
 
     if SAVE_ERRORS:
         feat_tag = f"f{cu_dim}"
-        _bparts = BASE_DIR.name.split("_")
-        _stress_label = "_".join(_bparts[:2] + ([DATA_VARIANT] if DATA_VARIANT else []))   # e.g. CU_CPU or CU_CPU_diff
-        save_dir = Path(__file__).parent / "exp_runs" / f"{_stress_label}_my_model"
-        save_dir.mkdir(parents=True, exist_ok=True)
-        err_path = save_dir / f"recon_errors_{test_topo}_{feat_tag}.npz"
+        err_path = Path(f"recon_errors_{test_topo}_{feat_tag}.npz")
         np.savez(err_path,
                  cu_sqerr=cu_sqerr, du_sqerr=du_sqerr,
                  cu_stress=cu_stress, du_stress=du_stress,
@@ -804,20 +840,6 @@ def run_one(train_topos, test_topo):
     cu_scores, du_scores, cu_pred, du_pred, eval_metrics = phase_evaluate(
         cu_sqerr, du_sqerr, cu_fn, du_fn, cu_thr, du_thr, cu_stress, du_stress
     )
-
-    # [8a] Root cause KPI accuracy ────────────────────────────────────────────
-    _start = COLD_START_K
-    cu_lbl_ev = (cu_stress[_start + 1:] == STRESS_TYPE)
-    du_lbl_ev = (du_stress[_start + 1:] == STRESS_TYPE)
-    rca_metrics = phase_root_cause(
-        cu_sqerr[_start:], du_sqerr[_start:],
-        cu_fn, du_fn,
-        cu_pred, du_pred,
-        cu_lbl_ev, du_lbl_ev,
-    )
-    for ent, rca in (rca_metrics or {}).items():
-        if ent in eval_metrics:
-            eval_metrics[ent].update(rca)
 
     # [8b] Diagnostics ────────────────────────────────────────────────────────
     cu_scores_cal = lift_score(cu_sqerr_n, cu_fn)
@@ -840,7 +862,7 @@ def run_one(train_topos, test_topo):
     print("\n[8c] Per-channel CU mean sq-error: CAL vs TEST (normal rows only)")
     cu_sqerr_normal_te = cu_sqerr[COLD_START_K:][cu_stress[COLD_START_K + 1:] == 0]
     print(f"  {'channel':>10s}  {'cal_mean':>10s}  {'te_normal_mean':>14s}  {'ratio':>6s}")
-    feat_names = ["cpu", "mem_pct", "mem_bytes", "net_tx", "net_rx", "net_diff", "net_ratio"]
+    feat_names = ["cpu", "mem_pct", "mem_bytes", "net_tx", "net_rx", "net_ratio"]
     for c in range(cu_sqerr.shape[1]):
         cal_m = float(np.mean(cu_sqerr_n[:, c]))
         te_m  = float(np.mean(cu_sqerr_normal_te[:, c])) if len(cu_sqerr_normal_te) else float("nan")
@@ -887,28 +909,6 @@ def main():
                     row += f"  {'N/A':>10s}"
             print(row)
         print(f"  {'-'*68}")
-
-        # Save LOO results to CSV (appends across stress types)
-        csv_path = Path(f"loo_results_{DATA_VARIANT}.csv" if DATA_VARIANT else "loo_results.csv")
-
-        write_header = not csv_path.exists()
-        with open(csv_path, "a", newline="") as f:
-            writer = csv.writer(f)
-            if write_header:
-                writer.writerow(["stress_type", "test_topo", "entity",
-                                 "anom", "tp", "fp", "fn", "precision", "recall", "f1",
-                                 "rc_correct", "rc_total", "rc_pct", "dominant_rc"])
-            for r in all_results:
-                for entity, m in r["metrics"].items():
-                    writer.writerow([
-                        STRESS_NAMES[STRESS_TYPE], r["test_topo"], entity,
-                        m["anom"], m["tp"], m["fp"], m["fn"],
-                        f"{m['p']:.4f}", f"{m['r']:.4f}", f"{m['f1']:.4f}",
-                        m.get("rc_correct", ""), m.get("rc_total", ""),
-                        f"{m['rc_pct']:.1f}" if isinstance(m.get("rc_pct"), float) and not (m["rc_pct"] != m["rc_pct"]) else "",
-                        m.get("dominant_rc", ""),
-                    ])
-        print(f"\n  Results appended → {csv_path.resolve()}")
     else:
         run_one(TRAIN_TOPOS, TEST_TOPO)
 

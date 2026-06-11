@@ -56,7 +56,6 @@ USAGE
 
 import sys
 import os
-import csv
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "src"))
 
 from pathlib import Path
@@ -78,12 +77,12 @@ from scoring import lift_score
 # =============================================================================
 
 ALL_TOPOS     = ["cu0_du0du1", "cu1_du2", "cu2_du3du4du5"]   # all available topologies
-TEST_TOPO     = "cu1_du2"                    # held-out topology; change to try a different split
+TEST_TOPO     = "cu2_du3du4du5"                    # held-out topology; change to try a different split
 TRAIN_TOPOS   = [t for t in ALL_TOPOS if t != TEST_TOPO]      # auto-derived: all except TEST_TOPO
-RUN_ALL_LOO   = True   # True → run all 3 leave-one-out splits sequentially and print a summary table
+RUN_ALL_LOO   = False   # True → run all 3 leave-one-out splits sequentially and print a summary table
 
-BASE_DIR      = Path("CU_NET_random_STRESS")
-STRESS_TYPE   = 3         # 1=CPU | 2=MEM | 3=NET  — must match the test dataset
+BASE_DIR      = Path("CU_NET_bidir_STRESS")
+STRESS_TYPE   = 3           # 1=CPU | 2=MEM | 3=NET  — must match the test dataset
 STRESS_NAMES  = {1: "CPU", 2: "MEM", 3: "NET"}
 
 # Feature slices — all KPIs minus permanently-zero features.
@@ -107,6 +106,11 @@ PREPROCESS_VERSION = "v0"
 # No zero-variance features remain after dropping the always-0 columns above.
 CU_ZV_IDX = []
 DU_ZV_IDX = []
+
+# Cold-start probe: run open-loop on the first N_PROBE_ROWS of the test stream to
+# estimate how much the CU score distribution shifted vs cal (cross-topology baseline
+# shift), then scale the CU threshold accordingly before the closed-loop run.
+N_PROBE_ROWS = 300
 
 # Model hyperparameters
 EMBED_DIM     = 32
@@ -134,15 +138,14 @@ DU_THRESHOLD_PCT = 99.9         # same as CU — safe now that glitch spikes are
 
 DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
 
-BIDIR = "bidir" in BASE_DIR.name   # derived from BASE_DIR name; True when directory contains "bidir"
+# Closed-loop inference: when an entity is detected as anomalous, its actual
+# input is replaced by the model's own prediction for the next step.  This
+# prevents the LSTM hidden state from adapting to a sustained anomaly level,
+# keeping the prediction anchored to normal behaviour throughout the stress
+# window.  Set to False to revert to the original open-loop inference.
+CLOSED_LOOP = True
 
-# Dataset-variant tag = the tokens between the stress TYPE and trailing "STRESS".
-#   CU_CPU_STRESS       -> ""        CU_CPU_diff_STRESS  -> "diff"   CU_CPU_bidir_STRESS -> "bidir"
-# Used to namespace checkpoints / plots / recon-errors / CSV so different datasets
-# (e.g. the diff-traffic run) never overwrite each other's artifacts.
-DATA_VARIANT = "_".join(BASE_DIR.name.split("_")[2:-1])
-# Filename prefix. Keep the legacy "bidr_" spelling for bidir runs; otherwise use the tag.
-CKPT_PREFIX  = "bidr_" if BIDIR else (f"{DATA_VARIANT}_" if DATA_VARIANT else "")
+BIDIR = "bidir" in BASE_DIR.name   # derived from BASE_DIR name; True when directory contains "bidir"
 
 # Prometheus irate glitch imputation: forward-fill rows where raw cpu/mem == 0.0.
 # WARNING: enabling this currently breaks results because feat_norm shrinks ~177×
@@ -151,7 +154,7 @@ CKPT_PREFIX  = "bidr_" if BIDIR else (f"{DATA_VARIANT}_" if DATA_VARIANT else ""
 # test cold-start too (not yet implemented).  Leave False until that is fixed.
 IMPUTE = True
 
-# Save reconstruction errors after inference so plot_recon_comparison.py
+# Save reconstruction errors after closed-loop inference so plot_recon_comparison.py
 # can overlay cpu-only vs cpu+mem results in a single figure.
 # Files are named  recon_errors_{test_topo}_f{cu_dim}.npz  (f1=cpu-only, f2=cpu+mem).
 SAVE_ERRORS = True
@@ -195,8 +198,7 @@ def slice_features(z: dict):
     #   6 = net_rx
     # -----------------------------------------------------------------
 
-    cu[:, 5] = cu[:, 5] / N_DU
-    cu[:, 6] = cu[:, 6] / N_DU
+    # /N_DU normalization removed for ablation (no_ndiv variant)
     cu = cu[:, CU_FEAT_SLICE]
     du = du[:, :, DU_FEAT_SLICE]
     if IMPUTE:
@@ -228,8 +230,8 @@ def slice_features(z: dict):
 # =============================================================================
 # PHASE 1: PREPROCESSING — fit RobustScaler on all train topologies (pooled),
 # then transform each stream. The fitted bundle is applied unchanged to the test
-# stream; cross-topology baseline shift is absorbed by the pooled-train scaler and
-# the type-shared /N normalization (no inference-time threshold adjustment).
+# stream; cross-topology baseline shift is addressed at threshold-calibration
+# time via the CU cold-start probe (see step [6b] in main()).
 # =============================================================================
 
 def phase_preprocess(train_zs, train_topos):
@@ -396,6 +398,99 @@ def phase_infer(model: CalibratedTopoAR, cu_s: np.ndarray, du_s: np.ndarray):
 
 
 # =============================================================================
+# PHASE 3b: CLOSED-LOOP SEQUENTIAL INFERENCE
+#
+# Root cause of DU miss: LSTM is a next-step predictor. When DU stress is
+# sustained for ~177 steps, after the first 1-2 steps the LSTM hidden state
+# tracks the elevated CPU value and starts predicting it correctly → sqerr≈0
+# → score drops below threshold → all subsequent stress timesteps are missed.
+#
+# Fix: when an entity's score exceeds the threshold at step t, replace its
+# actual input at t+1 with the model's own prediction (what normal looks like).
+# The LSTM hidden state then stays anchored to normal behaviour, so actual
+# (still-high) CPU values keep diverging from the prediction throughout the
+# entire stress window → score stays elevated → detections continue.
+#
+# Important: error is always (prediction - ACTUAL), not vs the substituted
+# input, so evaluation metrics are not artificially inflated.
+#
+# Calibration inference (phase_infer above) is unchanged — the cal stream is
+# all-normal, so no replacement ever fires there.
+# =============================================================================
+
+def phase_infer_closed_loop(
+    model: CalibratedTopoAR,
+    cu_s: np.ndarray,
+    du_s: np.ndarray,
+    cu_feat_norm: np.ndarray,
+    du_feat_norm: np.ndarray,
+    cu_thr: float,
+    du_thr: float,
+):
+    model.eval()
+    T  = len(cu_s)
+    N  = du_s.shape[1]
+
+    cu_sqerrs = np.zeros((T - 1, cu_s.shape[1]),    dtype=np.float32)
+    du_sqerrs = np.zeros((T - 1, N, du_s.shape[2]), dtype=np.float32)
+
+    h, c = model.init_state(1, DEVICE)
+    # Require K consecutive anomalous timesteps before closed-loop replacement.
+    DU_HYSTERESIS = 5
+    du_anom_count = np.zeros(N, dtype=np.int32)
+
+    CU_HYSTERESIS = 5
+    cu_anom_count = 0
+
+    # Feed actual values at t=0 to warm the LSTM
+    cu_in = torch.tensor(cu_s[[0]], dtype=torch.float32).to(DEVICE)  # (1, cu_dim)
+    du_in = torch.tensor(du_s[[0]], dtype=torch.float32).to(DEVICE)  # (1, N, du_dim)
+
+    with torch.no_grad():
+        for t in range(T - 1):
+            cu_tok, du_tok = model.project_tokens(cu_in, du_in)
+            cu_hat, du_hat, h, c, _ = model.step(cu_tok, du_tok, h, c)
+
+            # Actual values at the NEXT timestep
+            cu_next = torch.tensor(cu_s[[t + 1]], dtype=torch.float32).to(DEVICE)
+            du_next = torch.tensor(du_s[[t + 1]], dtype=torch.float32).to(DEVICE)
+
+            # Error always measured against actual (not against substituted input)
+            cu_err = (cu_hat - cu_next).pow(2).cpu().numpy()[0]  # (cu_dim,)
+            du_err = (du_hat - du_next).pow(2).cpu().numpy()[0]  # (N, du_dim)
+            cu_sqerrs[t] = cu_err
+            du_sqerrs[t] = du_err
+
+            # Score each entity and decide the input for step t+1
+            cu_score = float((cu_err / cu_feat_norm).max())
+
+            if cu_score > cu_thr:
+                cu_anom_count += 1
+            else:
+                cu_anom_count = 0
+
+            if cu_anom_count >= CU_HYSTERESIS:
+                cu_in = cu_hat
+            else:
+                cu_in = cu_next
+
+            du_in = du_next.clone()
+
+            for i in range(N):
+                du_score_i = float((du_err[i] / du_feat_norm).max())
+
+                if du_score_i > du_thr:
+                    du_anom_count[i] += 1
+                else:
+                    du_anom_count[i] = 0
+
+                # Enter closed-loop only after K consecutive anomaly steps
+                if du_anom_count[i] >= DU_HYSTERESIS:
+                    du_in[0, i] = du_hat[0, i]
+
+    return cu_sqerrs, du_sqerrs
+
+# =============================================================================
 # PHASE 4: CALIBRATE THRESHOLDS ON HELD-OUT TRAIN-CAL STREAM
 #
 # Input is the squared-error arrays from inference on the held-out CAL portion
@@ -508,63 +603,6 @@ def phase_evaluate(cu_sqerr, du_sqerr, cu_feat_norm, du_feat_norm,
     return cu_scores, du_scores, cu_pred, du_pred, all_metrics
 
 # =============================================================================
-# ROOT CAUSE KPI
-# =============================================================================
-
-_CU_FEAT_NAMES = ["cpu", "mem_pct", "mem_bytes", "net_tx", "net_rx", "net_diff", "net_ratio"]
-_DU_FEAT_NAMES = (["cpu", "mem_pct", "mem_bytes", "fs_writes", "net_tx", "net_rx"]
-                  + [f"pci_{i}" for i in range(22)]
-                  + ["net_diff", "net_ratio"])
-
-# For each stress type: which feature indices in the post-slice/post-derive arrays count as correct RC.
-# NET: tx(3)/rx(4)/diff(5)/ratio(6) for CU; tx(4)/rx(5)/diff(28)/ratio(29) for DU.
-_RC_FEAT_GROUPS = {
-    1: {"CU": {0},              "DU": {0}},
-    2: {"CU": {2},              "DU": {2}},   # mem_bytes (idx 2) is the dominant signal for MEM stress
-    3: {"CU": {3, 4, 5, 6},    "DU": {4, 5, 28, 29}},
-}
-
-
-def phase_root_cause(cu_sqerr_ev, du_sqerr_ev, cu_fn, du_fn, cu_pred, du_pred, cu_lbl, du_lbl):
-    """Print RC-KPI accuracy: fraction of TPs where argmax normalized error matches stress type."""
-    N = du_sqerr_ev.shape[1]
-    rc_groups = _RC_FEAT_GROUPS.get(STRESS_TYPE)
-    if rc_groups is None:
-        print(f"\n[8a] Root cause KPI: no mapping defined for STRESS_TYPE={STRESS_TYPE}")
-        return
-
-    rca_metrics = {}
-
-    def _rc_acc(sqerr_ev, feat_norm, pred, lbl, valid_feats, feat_names, ent_name):
-        tp_mask = pred.astype(bool) & lbl.astype(bool)
-        n_tp = int(tp_mask.sum())
-        if n_tp == 0:
-            print(f"  {ent_name:<12s}  TPs=     0  RC_correct=       0/0   (  N/A)  dominant_pred_RC=—")
-            rca_metrics[ent_name] = {"rc_correct": 0, "rc_total": 0, "rc_pct": float("nan"), "dominant_rc": "—"}
-            return
-        norm_err  = sqerr_ev[tp_mask] / feat_norm          # (n_tp, dim)
-        rc_idx    = np.argmax(norm_err, axis=1)             # (n_tp,) — argmax per TP timestep
-        rc_correct = np.isin(rc_idx, list(valid_feats))
-        n_correct  = int(rc_correct.sum())
-        pct        = 100.0 * n_correct / n_tp
-        counts     = np.bincount(rc_idx, minlength=len(feat_names))
-        top_feat   = feat_names[int(np.argmax(counts))]
-        print(f"  {ent_name:<12s}  TPs={n_tp:>6d}  RC_correct={n_correct:>6d}/{n_tp:<6d}"
-              f"  ({pct:5.1f}%)  dominant_pred_RC={top_feat}")
-        rca_metrics[ent_name] = {"rc_correct": n_correct, "rc_total": n_tp, "rc_pct": pct, "dominant_rc": top_feat}
-
-    expected_cu = "|".join(_CU_FEAT_NAMES[f] for f in sorted(rc_groups["CU"]))
-    print(f"\n[8a] Root cause KPI accuracy (stress={STRESS_NAMES[STRESS_TYPE]}, "
-          f"expected_CU={expected_cu}) ...")
-    print(f"  {'Entity':<12s}  {'TPs':>6s}  {'RC_correct':>20s}  {'dominant_pred_RC':>18s}")
-    print(f"  {'-'*64}")
-    _rc_acc(cu_sqerr_ev, cu_fn, cu_pred, cu_lbl, rc_groups["CU"], _CU_FEAT_NAMES, "CU")
-    for i in range(N):
-        _rc_acc(du_sqerr_ev[:, i, :], du_fn, du_pred[:, i], du_lbl[:, i],
-                rc_groups["DU"], _DU_FEAT_NAMES, f"DU_{i}")
-    return rca_metrics
-
-# =============================================================================
 # PLOTTING
 # =============================================================================
 
@@ -654,7 +692,7 @@ def phase_plot(cu_s_te, du_s_te, cu_stress, du_stress,
         axes[-1, col].set_xlabel("Timestep", fontsize=9)
 
     plt.tight_layout()
-    out = Path(f"cross_anomaly_plot_{CKPT_PREFIX}{test_topo}.png")
+    out = Path(f"cross_anomaly_plot_{test_topo}.png")
     plt.savefig(out, dpi=150, bbox_inches="tight")
     print(f"\n  Plot saved → {out.resolve()}")
     plt.close()
@@ -672,7 +710,7 @@ def run_one(train_topos, test_topo):
     Returns:     dict mapping entity name → {tp, fp, fn, p, r, f1, anom}
                  e.g. {"CU": {...}, "DU_0": {...}, "ANY": {...}}
     """
-    model_ckpt = Path(f"{CKPT_PREFIX}model_ckpt_test_{test_topo}.pt")   # per-split; delete to retrain
+    model_ckpt = Path(f"{'bidr_' if BIDIR else ''}no_ndiv_model_ckpt_test_{test_topo}.pt")   # per-split; delete to retrain
     cu_dim_info = len(np.arange(7)[CU_FEAT_SLICE])
     du_dim_info = len(np.arange(37)[DU_FEAT_SLICE])
 
@@ -680,7 +718,7 @@ def run_one(train_topos, test_topo):
     print(f"  Cross-topology {STRESS_NAMES[STRESS_TYPE]} stress detection (multi-train + RobustScaler {PREPROCESS_VERSION})")
     print(f"  Train : {train_topos}  (normal only, pooled)")
     print(f"  Test  : {test_topo}    (unseen topology)")
-    print(f"  Preprocessing : RobustScaler {PREPROCESS_VERSION}  (raw thresholds, no cold-start probe)")
+    print(f"  Preprocessing : RobustScaler {PREPROCESS_VERSION}  cold-start probe={N_PROBE_ROWS} rows")
     print(f"  CU features   : {cu_dim_info}   DU features: {du_dim_info}")
     print(f"  Device        : {DEVICE}")
     print(f"{'='*70}")
@@ -707,7 +745,7 @@ def run_one(train_topos, test_topo):
     du_dim = fit_streams[0][1].shape[2]
     if model_ckpt.exists():
         print(f"\n[3] Loading model from checkpoint ({model_ckpt}) — delete to retrain ...")
-        ckpt = torch.load(model_ckpt, map_location='cpu')
+        ckpt = torch.load(model_ckpt, map_location=DEVICE)
         mismatches = []
         if ckpt.get("topos") != list(train_topos):
             mismatches.append(f"topos: ckpt={ckpt.get('topos')} vs current={list(train_topos)}")
@@ -774,50 +812,72 @@ def run_one(train_topos, test_topo):
         print(f"  NOTE: test N_DU={n_du_te} not in train N_DU set {train_N_set} — "
               "type-shared weights generalise by design")
 
+    # [6b] Cold-start probe for CU and DU ────────────────────────────────────
+    print(f"\n[6b] Cold-start probe (first {N_PROBE_ROWS} test rows) ...")
+    n_probe = min(N_PROBE_ROWS + 1, len(cu_s_te))
+    cu_sq_probe, du_sq_probe = phase_infer(model, cu_s_te[:n_probe], du_s_te[:n_probe])
+
+    # CU probe
+    cu_probe_scores   = lift_score(cu_sq_probe[COLD_START_K:], cu_fn)
+    cu_test_p50       = float(np.percentile(cu_probe_scores, 50))
+    cu_cal_p50        = float(np.percentile(cu_norm_scores,  50))
+    cu_shift          = cu_test_p50 / max(cu_cal_p50, 1e-9)
+    cu_thr_adj        = cu_thr * max(1.0, cu_shift)
+    print(f"  CU probe p50: test={cu_test_p50:.4f}  cal={cu_cal_p50:.4f}  "
+          f"shift={cu_shift:.2f}x  →  CU thr {cu_thr:.4f} → {cu_thr_adj:.4f}")
+
+    # DU probe — flatten across DU instances (same as calibration pooling)
+    du_sq_probe_flat  = du_sq_probe[COLD_START_K:].reshape(-1, du_sq_probe.shape[-1])
+    du_probe_scores   = lift_score(du_sq_probe_flat, du_fn)
+    du_test_p50       = float(np.percentile(du_probe_scores, 50))
+    du_cal_p50        = float(np.percentile(du_norm_scores,  50))
+    du_shift          = du_test_p50 / max(du_cal_p50, 1e-9)
+    du_thr_adj = du_thr * np.sqrt(max(1.0, du_shift))
+    print(f"  DU probe p50: test={du_test_p50:.4f}  cal={du_cal_p50:.4f}  "
+          f"shift={du_shift:.2f}x  →  DU thr {du_thr:.4f} → {du_thr_adj:.4f}")
+
     # [7] Sequential inference on full test stream ────────────────────────────
-    # Thresholds are the raw pooled-cal percentiles (cu_thr, du_thr). The
-    # cold-start probe that previously rescaled them was removed: for NET stress
-    # it inflated the CU threshold ~20× and zeroed real detections. Cross-topology
-    # baseline shift is handled by the pooled-train RobustScaler + type-shared /N
-    # normalization, not by an inference-time threshold band-aid.
-    print("\n[7] Running inference on test stream ...")
-    cu_sqerr, du_sqerr = phase_infer(model, cu_s_te, du_s_te)
+    if CLOSED_LOOP:
+        print("\n[7] Running CLOSED-LOOP inference on test stream "
+              "(anomalous inputs replaced with model predictions) ...")
+        cu_sqerr, du_sqerr = phase_infer_closed_loop(
+            model, cu_s_te, du_s_te, cu_fn, du_fn, cu_thr_adj, du_thr_adj
+        )
+    else:
+        print("\n[7] Running open-loop inference on test stream ...")
+        cu_sqerr, du_sqerr = phase_infer(model, cu_s_te, du_s_te)
     print(f"  cu_sqerr {cu_sqerr.shape}  du_sqerr {du_sqerr.shape}")
 
     if SAVE_ERRORS:
         feat_tag = f"f{cu_dim}"
-        _bparts = BASE_DIR.name.split("_")
-        _stress_label = "_".join(_bparts[:2] + ([DATA_VARIANT] if DATA_VARIANT else []))   # e.g. CU_CPU or CU_CPU_diff
-        save_dir = Path(__file__).parent / "exp_runs" / f"{_stress_label}_my_model"
-        save_dir.mkdir(parents=True, exist_ok=True)
-        err_path = save_dir / f"recon_errors_{test_topo}_{feat_tag}.npz"
+        err_path = Path(f"recon_errors_{test_topo}_{feat_tag}.npz")
         np.savez(err_path,
                  cu_sqerr=cu_sqerr, du_sqerr=du_sqerr,
                  cu_stress=cu_stress, du_stress=du_stress,
                  cu_feat_norm=cu_fn, du_feat_norm=du_fn,
                  cu_thr=np.array([cu_thr]),
-                 du_thr=np.array([du_thr]))
+                 cu_thr_adj=np.array([cu_thr_adj]),
+                 du_thr=np.array([du_thr]),
+                 du_thr_adj=np.array([du_thr_adj]))
         print(f"  Errors saved → {err_path}")
+
+    # [7b] Ablation: same errors, raw (unadjusted) thresholds
+    # Difference vs [8] below isolates the cold-start probe's contribution.
+    print("\n[7b] ABLATION — raw threshold (no cold-start probe adjustment) ...")
+    _, _, _, _, metrics_raw = phase_evaluate(
+        cu_sqerr, du_sqerr, cu_fn, du_fn,
+        cu_thr, du_thr,
+        cu_stress, du_stress,
+    )
+    print("  [ABLATION raw-thr] " + "  ".join(
+        f"{k}={v['f1']:.3f}" for k, v in metrics_raw.items()
+    ))
 
     # [8] Evaluate ─────────────────────────────────────────────────────────────
     print("\n[8] Evaluation results ...")
     cu_scores, du_scores, cu_pred, du_pred, eval_metrics = phase_evaluate(
-        cu_sqerr, du_sqerr, cu_fn, du_fn, cu_thr, du_thr, cu_stress, du_stress
+        cu_sqerr, du_sqerr, cu_fn, du_fn, cu_thr_adj, du_thr_adj, cu_stress, du_stress
     )
-
-    # [8a] Root cause KPI accuracy ────────────────────────────────────────────
-    _start = COLD_START_K
-    cu_lbl_ev = (cu_stress[_start + 1:] == STRESS_TYPE)
-    du_lbl_ev = (du_stress[_start + 1:] == STRESS_TYPE)
-    rca_metrics = phase_root_cause(
-        cu_sqerr[_start:], du_sqerr[_start:],
-        cu_fn, du_fn,
-        cu_pred, du_pred,
-        cu_lbl_ev, du_lbl_ev,
-    )
-    for ent, rca in (rca_metrics or {}).items():
-        if ent in eval_metrics:
-            eval_metrics[ent].update(rca)
 
     # [8b] Diagnostics ────────────────────────────────────────────────────────
     cu_scores_cal = lift_score(cu_sqerr_n, cu_fn)
@@ -832,10 +892,10 @@ def run_one(train_topos, test_topo):
     du_te_scores = lift_score(du_sqerr_flat_te, du_fn)
     print(f"  {'DU cal':6s}  " + "  ".join(f"{np.percentile(du_scores_cal, p):6.3f}" for p in pcts))
     print(f"  {'DU te ':6s}  " + "  ".join(f"{np.percentile(du_te_scores, p):6.3f}" for p in pcts))
-    print(f"  CU thr (cal={cu_thr:.4f})  →  "
-          f"fraction test above thr: {(cu_te_scores > cu_thr).mean():.3f}")
-    print(f"  DU thr (cal={du_thr:.4f})  →  "
-          f"fraction test above thr: {(du_te_scores > du_thr).mean():.3f}")
+    print(f"  CU thr (cal={cu_thr:.4f}, adj={cu_thr_adj:.4f})  →  "
+          f"fraction test above adj thr: {(cu_te_scores > cu_thr_adj).mean():.3f}")
+    print(f"  DU thr (cal={du_thr:.4f}, adj={du_thr_adj:.4f})  →  "
+          f"fraction test above adj thr: {(du_te_scores > du_thr_adj).mean():.3f}")
 
     print("\n[8c] Per-channel CU mean sq-error: CAL vs TEST (normal rows only)")
     cu_sqerr_normal_te = cu_sqerr[COLD_START_K:][cu_stress[COLD_START_K + 1:] == 0]
@@ -850,7 +910,7 @@ def run_one(train_topos, test_topo):
     # [9] Plot ─────────────────────────────────────────────────────────────────
     print("\n[9] Generating plot ...")
     phase_plot(cu_s_te, du_s_te, cu_stress, du_stress,
-               cu_scores, du_scores, cu_pred, du_pred, cu_thr, du_thr,
+               cu_scores, du_scores, cu_pred, du_pred, cu_thr_adj, du_thr_adj,
                train_topos, test_topo)
 
     print("\nDone.")
@@ -887,28 +947,6 @@ def main():
                     row += f"  {'N/A':>10s}"
             print(row)
         print(f"  {'-'*68}")
-
-        # Save LOO results to CSV (appends across stress types)
-        csv_path = Path(f"loo_results_{DATA_VARIANT}.csv" if DATA_VARIANT else "loo_results.csv")
-
-        write_header = not csv_path.exists()
-        with open(csv_path, "a", newline="") as f:
-            writer = csv.writer(f)
-            if write_header:
-                writer.writerow(["stress_type", "test_topo", "entity",
-                                 "anom", "tp", "fp", "fn", "precision", "recall", "f1",
-                                 "rc_correct", "rc_total", "rc_pct", "dominant_rc"])
-            for r in all_results:
-                for entity, m in r["metrics"].items():
-                    writer.writerow([
-                        STRESS_NAMES[STRESS_TYPE], r["test_topo"], entity,
-                        m["anom"], m["tp"], m["fp"], m["fn"],
-                        f"{m['p']:.4f}", f"{m['r']:.4f}", f"{m['f1']:.4f}",
-                        m.get("rc_correct", ""), m.get("rc_total", ""),
-                        f"{m['rc_pct']:.1f}" if isinstance(m.get("rc_pct"), float) and not (m["rc_pct"] != m["rc_pct"]) else "",
-                        m.get("dominant_rc", ""),
-                    ])
-        print(f"\n  Results appended → {csv_path.resolve()}")
     else:
         run_one(TRAIN_TOPOS, TEST_TOPO)
 
