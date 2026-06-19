@@ -45,12 +45,12 @@ import pandas as pd
 # =============================================================================
 
 TRAIN_CSV   = Path("/home/somya/workspace/thesis3/topoar_gpu_run/clear_pipeline/data/train_normal_random_traffic_72h_exp.csv")
-TEST_CSV    = Path("/home/somya/workspace/thesis3/topoar_gpu_run/clear_pipeline/data/anomaly_random_du_cpu_stress_exp.csv")
+TEST_CSV    = Path("/home/somya/workspace/thesis3/topoar_gpu_run/clear_pipeline/data/anomaly_random_cu_net_stress_exp.csv")
 
-TOPOLOGY    = "cu2_du3du4du5"   # options: "cu0_du0du1" | "cu1_du2" | "cu2_du3du4du5"
-STRESS_TYPE = 1           # 1=CPU | 2=MEM | 3=NET
+TOPOLOGY    = "cu1_du2"   # options: "cu0_du0du1" | "cu1_du2" | "cu2_du3du4du5"
+STRESS_TYPE = 3           # 1=CPU | 2=MEM | 3=NET
 
-OUT_DIR     = Path("DU_CPU_random_STRESS") / f"{TOPOLOGY}_stress{STRESS_TYPE}"
+OUT_DIR     = Path("CU_NET_random_STRESS") / f"{TOPOLOGY}_stress{STRESS_TYPE}"
 
 # =============================================================================
 # TOPOLOGY REGISTRY — add new topologies here if needed
@@ -189,7 +189,12 @@ def filter_test(
 
     n_dropped = (~keep).sum()
     print(f"  Filter dropped {n_dropped:,} rows, kept {keep.sum():,}")
-    return test[keep].reset_index(drop=True)
+    # Keep the ORIGINAL row index: dropped rows create hidden time-splices in
+    # the output stream; the caller derives seg_id from gaps in this index so
+    # downstream consumers can reset stateful processing (rolling stats, LSTM
+    # hidden state, CUSUM) at each splice instead of treating the stream as
+    # continuous time.
+    return test[keep]
 
 
 # =============================================================================
@@ -274,6 +279,16 @@ def main():
     print(f"                     Step 2: keep other-topology entities at stress=0) ...")
     test = filter_test(test_raw, topo_cfg, STRESS_TYPE, TOPOLOGY_REGISTRY)
 
+    # seg_id: contiguous-time segments of the filtered stream. A new segment
+    # starts wherever filtering removed rows (gap in the raw CSV index) —
+    # adjacent output rows there are NOT adjacent in real time.
+    raw_idx = test.index.values
+    seg_id = np.concatenate([[0], np.cumsum(np.diff(raw_idx) > 1)]).astype(np.int64)
+    n_seg = int(seg_id[-1]) + 1
+    print(f"  Time segments after filtering: {n_seg} "
+          f"(stateful consumers should reset at each boundary)")
+    test = test.reset_index(drop=True)
+
     test_cu = test[cu_cols].fillna(0.0).astype(np.float32).values
     test_du = np.stack(
         [test[cols].fillna(0.0).astype(np.float32).values for cols in du_cols_per_instance],
@@ -302,6 +317,7 @@ def main():
         block_id=test_block_id,
         cu_stress=cu_stress,
         du_stress=du_stress,
+        seg_id=seg_id,
     )
 
     # ── Save blocks.csv ───────────────────────────────────────────────────────
